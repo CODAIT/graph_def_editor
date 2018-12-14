@@ -1,3 +1,4 @@
+# Copyright 2018 IBM. All Rights Reserved.
 # Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,14 +21,13 @@ from __future__ import division
 from __future__ import print_function
 
 import copy
-
 import six
 from six import iteritems
 from six import StringIO
+import tensorflow as tf
 
-from tensorflow.contrib.graph_editor import select
-from tensorflow.contrib.graph_editor import util
-from tensorflow.python.framework import ops as tf_ops
+from pge import select
+from pge import util
 
 __all__ = [
     "SubGraphView",

@@ -24,12 +24,13 @@ from __future__ import print_function
 
 # pylint: disable=wildcard-import
 from pge.edit import *
+from pge.graph import *
+from pge.node import *
 from pge.reroute import *
 from pge.select import *
 from pge.subgraph import *
 from pge.transform import *
 from pge.util import *
-from pge.wrappers import *
 # pylint: enable=wildcard-import
 
 # some useful aliases

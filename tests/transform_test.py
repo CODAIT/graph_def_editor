@@ -34,14 +34,16 @@ ERROR_TOLERANCE = 1e-3
 class TransformTest(unittest.TestCase):
 
   def setUp(self):
-    self.graph = ops.Graph()
-    with self.graph.as_default():
-      c0 = constant_op.constant(1.0, shape=[10], name="Const")
-      c0.op._set_attr("_foo", attr_value_pb2.AttrValue(s=b"foo"))
-      c1 = constant_op.constant(1.0, shape=[10], name="Const")
-      c2 = constant_op.constant(1.0, shape=[10], name="Const")
-      i = constant_op.constant(1.0, shape=[10], name="Input")
-      self.o = math_ops.add(c2, math_ops.add(c1, math_ops.add(c0, i)))
+    tf_graph = tf.Graph()
+    with tf_graph.as_default():
+      c0 = tf.constant(1.0, shape=[10], name="Const")
+      c0.op._set_attr("_foo", tf.AttrValue(s=b"foo"))
+      c1 = tf.constant(1.0, shape=[10], name="Const")
+      c2 = tf.constant(1.0, shape=[10], name="Const")
+      i = tf.constant(1.0, shape=[10], name="Input")
+      tf.add(c2, tf.add(c1, tf.add(c0, i)), name="o")
+    self.graph = pge.Graph(tf_graph)
+    self.o = self.graph["o"]
 
   def test_copy(self):
     graph = ops.Graph()
@@ -109,7 +111,7 @@ class TransformTest(unittest.TestCase):
     self.assertTrue(matcher2(top))
 
   def test_transform_nodedef_fn(self):
-    transformer = ge.Transformer()
+    transformer = pge.Transformer()
 
     def nodedef_fn(node_def):
       if "_foo" in node_def.attr:
@@ -118,10 +120,10 @@ class TransformTest(unittest.TestCase):
       return node_def
 
     my_copy_op_handler = functools.partial(
-        ge.transform.copy_op_handler, nodedef_fn=nodedef_fn)
+        pge.transform.copy_op_handler, nodedef_fn=nodedef_fn)
     transformer.transform_op_handler = my_copy_op_handler
 
-    graph = ops.Graph()
+    graph = pge.Graph()
     transformer(self.graph, graph, "", "")
 
     c0_before = self.graph.get_operation_by_name("Const")

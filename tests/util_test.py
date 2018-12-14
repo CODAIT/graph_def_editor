@@ -80,9 +80,9 @@ class UtilTest(unittest.TestCase):
     g0 = pge.Graph(g0_graph)
 
     # Should extract the ops from the graph.
-    self.assertEqual(len(pge.util.make_list_of_node(g0)), 2)
+    self.assertEqual(len(pge.util.make_list_of_op(g0)), 2)
     # Should extract the ops from the tuple.
-    self.assertEqual(len(pge.util.make_list_of_node((g0["a0"], g0["b0"]))), 2)
+    self.assertEqual(len(pge.util.make_list_of_op((g0["a0"], g0["b0"]))), 2)
 
   def test_make_list_of_t(self):
     """Test for pge.util.make_list_of_t."""

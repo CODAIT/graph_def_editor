@@ -1,3 +1,4 @@
+# Copyright 2018 IBM. All Rights Reserved.
 # Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,12 +26,11 @@ from six import iteritems
 from six import iterkeys
 from six import string_types
 from six import StringIO
-from tensorflow.contrib.graph_editor import reroute
-from tensorflow.contrib.graph_editor import select
-from tensorflow.contrib.graph_editor import subgraph
-from tensorflow.contrib.graph_editor import util
-from tensorflow.python.framework import ops as tf_ops
-from tensorflow.python.platform import tf_logging as logging
+import tensorflow as tf
+
+from pge import subgraph
+from pge import util
+from pge.graph import Graph
 
 
 __all__ = [
@@ -437,7 +437,7 @@ class Transformer(object):
       ValueError: if the arguments are invalid.
     """
     sgv = subgraph.make_view(sgv)
-    if not isinstance(dst_graph, tf_ops.Graph):
+    if not isinstance(dst_graph, Graph):
       raise TypeError("Expected a tf.Graph, got: {}".format(type(dst_graph)))
 
     src_scope = util.scope_finalize(src_scope)

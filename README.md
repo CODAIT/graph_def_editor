@@ -10,11 +10,20 @@ TensorFlow. The editor uses the SavedModel format for both input and output.
 
 TODO: Example usage
 
+## Project status
+
+**This project is a work in progress.**
+
+Current status: 9 of 50 original regression tests passing.
 
 ## Contents of root directory:
 
+* env: Not in git repo; create by running scripts/env.sh. Anaconda virtualenv
+  for running tests and notebooks in this project.
+* notebooks: Jupyter notebooks.
 * pge: Source code for the Python package
 * scripts: Useful shell and Python scripts
+* tests: pytest tests. To run, create and activate
 
 
 

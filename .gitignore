@@ -2,3 +2,6 @@
 .ipynb_checkpoints
 env
 *.swp
+*/__pycache__
+pge.iml
+

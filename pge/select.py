@@ -22,9 +22,9 @@ import re
 
 from six import iteritems
 from six import string_types
+import tensorflow as tf
 
-from tensorflow.contrib.graph_editor import util
-from tensorflow.python.framework import ops as tf_ops
+from pge import util
 
 __all__ = [
     "can_be_regex",
@@ -286,7 +286,7 @@ def compute_boundary_ts(ops):
   consumed by operations both outside and inside of `ops`.
 
   Args:
-    ops: an object convertible to a list of tf.Operation.
+    ops: an object convertible to a list of `pge.Node`
   Returns:
     A tuple `(outside_input_ts, outside_output_ts, inside_ts)` where:
       `outside_input_ts` is a Python list of input tensors;
@@ -313,7 +313,7 @@ def compute_boundary_ts(ops):
     # Mark as "inside".
     inside_ts.append(t)
     # Mark as "only inside" if the tensor is not both inside and output.
-    consumers = frozenset(t.consumers())
+    consumers = frozenset(t.consumers)
     if consumers - ops_set:
       continue
     only_inside_ts.append(t)

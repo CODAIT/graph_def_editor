@@ -24,17 +24,20 @@ import re
 
 import tensorflow as tf
 
-from pge import wrappers
+from pge.graph import Graph
+#from pge import graph
+from pge import tensor
+from pge import node
 
 __all__ = [
-    "make_list_of_node",
-    "make_list_of_t",
-    "get_generating_ops",
-    "get_consuming_ops",
-    "ControlOutputs",
-    "placeholder_name",
-    "make_placeholder_from_tensor",
-    "make_placeholder_from_dtype_and_shape",
+  "make_list_of_op",
+  "make_list_of_t",
+  "get_generating_ops",
+  "get_consuming_ops",
+  "ControlOutputs",
+  "placeholder_name",
+  "make_placeholder_from_tensor",
+  "make_placeholder_from_dtype_and_shape",
 ]
 
 
@@ -98,7 +101,7 @@ class ListView(object):
 # TODO(fkp): very generic code, it should be moved in a more generic place.
 def is_iterable(obj):
   """Return true if the object is iterable."""
-  if isinstance(obj, wrappers.Node):
+  if isinstance(obj, node.Node):
     return False
   try:
     _ = iter(obj)
@@ -115,11 +118,11 @@ def check_graphs(*args):
   Raises:
     ValueError: if all the elements do not belong to the same graph.
   """
-  graph = None
+  g = None
   for i, sgv in enumerate(args):
-    if graph is None and sgv.graph is not None:
-      graph = sgv.graph
-    elif sgv.graph is not None and sgv.graph is not graph:
+    if g is None and sgv.graph is not None:
+      g = sgv.graph
+    elif sgv.graph is not None and sgv.graph is not g:
       raise ValueError("Argument[{}]: Wrong graph!".format(i))
 
 
@@ -139,12 +142,12 @@ def get_unique_graph(tops, check_types=None, none_if_empty=False):
     TypeError: if tops is not a iterable of tf.Operation.
     ValueError: if the graph is not unique.
   """
-  if isinstance(tops, wrappers.Graph):
+  if isinstance(tops, Graph):
     return tops
   if not is_iterable(tops):
     raise TypeError("{} is not iterable".format(type(tops)))
   if check_types is None:
-    check_types = (wrappers.Node, wrappers.Tensor,)
+    check_types = (node.Node, tensor.Tensor,)
   elif not is_iterable(check_types):
     check_types = (check_types,)
   g = None
@@ -161,7 +164,7 @@ def get_unique_graph(tops, check_types=None, none_if_empty=False):
   return g
 
 
-def make_list_of_node(ops, check_graph=True, allow_graph=True, ignore_ts=False):
+def make_list_of_op(ops, check_graph=True, allow_graph=True, ignore_ts=False):
   """Convert ops to a list of `pge.Node`.
 
   Args:
@@ -177,7 +180,7 @@ def make_list_of_node(ops, check_graph=True, allow_graph=True, ignore_ts=False):
      if `check_graph` is `True`, if all the ops do not belong to the
      same graph.
   """
-  if isinstance(ops, wrappers.Graph):
+  if isinstance(ops, Graph):
     if allow_graph:
       return ops.nodes
     else:
@@ -188,9 +191,9 @@ def make_list_of_node(ops, check_graph=True, allow_graph=True, ignore_ts=False):
     if not ops:
       return []
     if check_graph:
-      check_types = None if ignore_ts else wrappers.Node
+      check_types = None if ignore_ts else node.Node
       get_unique_graph(ops, check_types=check_types)
-    return [op for op in ops if isinstance(op, wrappers.Node)]
+    return [op for op in ops if isinstance(op, node.Node)]
 
 
 def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False):
@@ -207,7 +210,7 @@ def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False):
     TypeError: if `ts` cannot be converted to a list of `pge.Tensor` or,
      if `check_graph` is `True`, if all the ops do not belong to the same graph.
   """
-  if isinstance(ts, wrappers.Graph):
+  if isinstance(ts, Graph):
     if allow_graph:
       return ts.tensors
     else:
@@ -218,9 +221,9 @@ def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False):
     if not ts:
       return []
     if check_graph:
-      check_types = None if ignore_ops else (wrappers.Tensor,)
+      check_types = None if ignore_ops else (tensor.Tensor,)
       get_unique_graph(ts, check_types=check_types)
-    return [t for t in ts if isinstance(t, wrappers.Tensor)]
+    return [t for t in ts if isinstance(t, tensor.Tensor)]
 
 
 def get_generating_ops(ts):
@@ -261,11 +264,11 @@ def get_consuming_ops(ts):
 class ControlOutputs(object):
   """The control outputs topology."""
 
-  def __init__(self, graph: wrappers.Graph):
+  def __init__(self, g: Graph):
     """Create a dictionary of control-output dependencies.
 
     Args:
-      graph: a `pge.Graph`.
+      g: a `pge.Graph`.
     Returns:
       A dictionary where a key is `pge.Node` object and the corresponding value
       is a list of all the ops which have the keys one of their control-input
@@ -273,10 +276,10 @@ class ControlOutputs(object):
     Raises:
       TypeError: graph is not a `pge.Graph`.
     """
-    if not isinstance(graph, wrappers.Graph):
-      raise TypeError("Expected a pge.Graph, got: {}".format(type(graph)))
+    if not isinstance(g, Graph):
+      raise TypeError("Expected a pge.Graph, got: {}".format(type(g)))
     self._control_outputs = {}
-    self._graph = graph
+    self._graph = g
     self._version = None
     self._build()
 
@@ -351,7 +354,7 @@ def placeholder_name(t=None, scope=None, prefix=_DEFAULT_PLACEHOLDER_PREFIX):
   if scope is not None:
     scope = scope_finalize(scope)
   if t is not None:
-    if not isinstance(t, wrappers.Tensor):
+    if not isinstance(t, tensor.Tensor):
       raise TypeError("Expected a pge.Tensor, got: {}".format(type(t)))
     op_dirname = scope_dirname(t.operator.name)
     op_basename = scope_basename(t.operator.name)
@@ -370,7 +373,7 @@ def placeholder_name(t=None, scope=None, prefix=_DEFAULT_PLACEHOLDER_PREFIX):
     return "{}{}".format(scope, prefix)
 
 
-def _make_placeholder(graph: wrappers.Graph,
+def _make_placeholder(graph: Graph,
                       dtype: tf.DType,
                       shape,
                       name: str):
