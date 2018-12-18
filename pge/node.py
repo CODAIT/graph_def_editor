@@ -228,7 +228,8 @@ class MutableNode(Node):
 
   @Node.inputs.setter
   def set_inputs(self, new_inputs: Iterable[tensor.Tensor]):
-    """Set all inputs at once, removing anything that was there previously.
+    """
+    Set all inputs at once, removing anything that was there previously.
 
     Args:
       new_inputs: Iterable of `Tensor` objects on this object's parent graph

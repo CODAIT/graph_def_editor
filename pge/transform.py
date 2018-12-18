@@ -479,7 +479,7 @@ class Transformer(object):
   def _connect_control_inputs(self, info):
     """Connect the previously copied ops."""
     for op in info.sgv.ops:
-      logging.debug("Connecting control inputs of op: %s", op.name)
+      tf.logging.debug("Connecting control inputs of op: %s", op.name)
       op_ = info.transformed_ops[op]
 
       # Finalize original op.
@@ -488,7 +488,7 @@ class Transformer(object):
       if op._original_op:
         original_op = self.transform_original_op_handler(info, op._original_op)
         if original_op is None:
-          logging.debug("Could not find original op for: %s", op_.name)
+          tf.logging.debug("Could not find original op for: %s", op_.name)
         else:
           op_._original_op = original_op
       # pylint: enable=protected-access

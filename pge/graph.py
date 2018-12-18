@@ -137,11 +137,7 @@ class Graph(object):
       `MutableNode` wrapper for the new node
     """
     ret = self.add_node(node_def.name, node_def.op)
-
-    # TODO: Copy over inputs
-
-    print("Device is '{}' (type {})".format(node_def.device,
-                                          type(node_def.device)))
+    ret.set_inputs_from_strings(node_def.input, set_control_inputs=True)
     ret.set_device(node_def.device)
     ret.clear_attrs()
     for key in node_def.attr:

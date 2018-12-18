@@ -445,7 +445,7 @@ _INTERNAL_VARIABLE_RE = re.compile(r"^__\w+__$")
 
 def get_predefined_collection_names():
   """Return all the predefined collection names."""
-  return [getattr(tf_ops.GraphKeys, key) for key in dir(tf_ops.GraphKeys)
+  return [getattr(tf.GraphKeys, key) for key in dir(tf.GraphKeys)
           if not _INTERNAL_VARIABLE_RE.match(key)]
 
 
