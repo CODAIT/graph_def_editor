@@ -77,7 +77,7 @@ class Graph(object):
     self._version = 0
     self._collections = {}
 
-  def __getitem__(self, name: str) -> 'Node':
+  def __getitem__(self, name: str) -> node.Node:
     """
     Retrieve a node of the graph by name
 
@@ -103,24 +103,102 @@ class Graph(object):
     else:
       return self._immutable_nodes[ixs[0]]
 
-  def add_node(self, name: str, op: str):
+  def add_node(self, name: str, op: str) -> node.MutableNode:
     """
-    Add a new node to the graph.
+    Add a new, empty node to the graph.
     Args:
       name: Unique name for the new op
       op: Name of the type of operation for the node
 
     Returns:
-      MutableNode wrapper for the new node
+      `MutableNode` wrapper for the new node.
     """
-    if name in self._added_nodes.keys() or name in [d.name for d in
-                                                    self._graph_def.node]:
-      raise ValueError("Graph already contains a node with name '{}'".format(
-        name))
+    if self._name_in_use(name):
+      raise ValueError("Graph already contains a node with name '{}' "
+                       "(Note that this check is case-insensitive)."
+                       .format(name))
     ret = node.MutableNode(self, self._get_next_id(), name, op)
     self._added_nodes[name] = ret
-    self._increment_version_counter()
+    self.increment_version_counter()
     return ret
+
+  def add_node_from_node_def(self, node_def: tf.NodeDef) -> node.MutableNode:
+    """
+    Adds a new node to the graph, populating fields of the node from a
+    `tf.NodeDef` protocol buffer.
+
+    Equivalent to calling `add_node()`, then populating the relevant fields
+    of the returned MutableNode object.
+
+    Args:
+      node_def: Protocol buffer describing parameters of the new node.
+
+    Returns:
+      `MutableNode` wrapper for the new node
+    """
+    ret = self.add_node(node_def.name, node_def.op)
+
+    # TODO: Copy over inputs
+
+    print("Device is '{}' (type {})".format(node_def.device,
+                                          type(node_def.device)))
+    ret.set_device(node_def.device)
+    ret.clear_attrs()
+    for key in node_def.attr:
+      ret.add_attr(key, node_def.attr[key])
+
+    # Don't need to increment version counter; add_node() already did that.
+    return ret
+
+  def _name_in_use(self, name: str):
+    """Check whether a name is in use, using the same collision semantics as
+    TensorFlow: Exact lowercase string match.
+
+    Args:
+      name: Name of a potential node in the graph.
+
+    Returns True if the indicated name is currently in use, ignoring case.
+    """
+    lower_case_name = name.lower()
+    lower_added_names = [k.lower() for k in self._added_nodes.keys()]
+    lower_immutable_names = [n.name.lower() for n in self._graph_def.node]
+    lower_deleted_names = [d.lower() for d in self._deleted_nodes]
+    return lower_case_name in lower_added_names or (
+      lower_case_name in lower_immutable_names
+      and lower_case_name not in lower_deleted_names
+    )
+
+  def unique_name(self, name: str):
+    """Emulate the behavior of the method by the same name in `tf.Graph`.
+
+    Does *not* emulate the `name_stack` field of `tf.Graph`.
+
+    Unlike the original method, this version does *not* keep a separate table
+    of names currently "in use for the purposes of `unique_name()`", but instead
+    refers directly to internal data structures to find names that are truly
+    in use.
+
+    Args:
+      name: The name for an operation.
+
+    Returns:
+      A variant of `name` that has been made unique by appending a key to it
+      in the same way that `tf.Graph.unique_name()` would.
+    """
+    # For the sake of checking for names in use, we treat names as case
+    # insensitive (e.g. foo = Foo).
+    if not self._name_in_use(name):
+      return name
+
+    # Generate a unique version by appending "_1", "_2", etc. until we find
+    # an unused name. Note that this approach will behave slightly
+    # differently from the original if nodes are deleted.
+    i = 1
+    new_name = "{}_{}".format(name, i)
+    while self._name_in_use(new_name):
+      i = i + 1
+      new_name = "{}_{}".format(name, i)
+    return new_name
 
   @property
   def nodes(self) -> Tuple[node.Node]:
@@ -150,7 +228,11 @@ class Graph(object):
     """
     return self._version
 
-  def _increment_version_counter(self):
+  def increment_version_counter(self):
+    """
+    Mark the structure of this graph as "changed" and invalidate any cached
+    information about the edges of the graph.
+    """
     self._version += 1
 
   def get_collection(self, name: str):
@@ -179,6 +261,7 @@ class Graph(object):
 ################################################################################
 # Stuff below this line is private to this file.
 
+
 def _decode_graph(graph_def):
   """
   Use public TensorFlow APIs to decode the important information that is not
@@ -192,10 +275,9 @@ def _decode_graph(graph_def):
       otherwise some of the type inference operations that this function
       performs will fail.
 
-  :returns: A tuple (output_map, ...)
-  where:
-    output_map is a map from operator name to a list of (type, shape) pairs
-      that describe in turn each of the outputs of said operator.
+  Returns:
+    A map from operator name to a list of (type, shape) pairs that describe
+    in turn each of the outputs of said operator.
   """
   # The information in a NodeDef is not sufficient to determine output type
   # information. For that kind of type inference, you need access to the

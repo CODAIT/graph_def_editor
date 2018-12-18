@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+import tensorflow as tf
+
 __all__ = [
   "Tensor",
 ]
@@ -24,7 +26,7 @@ class Tensor(object):
   a tf.Tensor in the TensorFlow Python API, though serialized TensorFlow graphs
   do not contain any separate objects that represent tensors.
   """
-  def __init__(self, node, index, dtype, shape):
+  def __init__(self, node, index, dtype: tf.DType, shape: tf.shape):
     """
     Args:
       node: pge.Node object that represents the graph node that produces this
@@ -44,6 +46,11 @@ class Tensor(object):
 
   @property
   def value_index(self):
+    """
+    Emulates the behavior of `tf.Tensor.value_index`
+
+    Returns the output index of this Tensor among the outputs of the parent
+    Node."""
     return self._index
 
   @property
@@ -72,3 +79,17 @@ class Tensor(object):
         ret.append(n)
 
     return ret
+
+  @property
+  def name(self):
+    """
+    Emulates the behavior of `tf.Tensor.name`
+
+    Returns:
+      A TensorFlow-like tensor name string in the form "<op>" (output 0) or
+      "<op>:<output index>" (other outputs)
+    """
+    if 0 == self.value_index:
+      return self.operator.name
+    else:
+      return "{}:{}".format(self.operator.name, self.value_index)

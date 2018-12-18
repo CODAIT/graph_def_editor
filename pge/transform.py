@@ -27,10 +27,13 @@ from six import iterkeys
 from six import string_types
 from six import StringIO
 import tensorflow as tf
+from typing import Tuple, List, Iterable
 
 from pge import subgraph
 from pge import util
+from pge.node import Node
 from pge.graph import Graph
+from pge.tensor import Tensor
 
 
 __all__ = [
@@ -129,14 +132,18 @@ def transform_op_if_inside_handler(info, op, keep_if_possible=True):
       return None
 
 
-def copy_op_handler(info, op, new_inputs, copy_shape=False, nodedef_fn=None):
-  """Copy a `tf.Operation`.
+def copy_op_handler(info, op: Node, new_inputs: Iterable[Tensor],
+                    copy_shape_and_dtype: bool = False,
+                    nodedef_fn=None):
+  """Copy a node into the target graph.
 
   Args:
     info: Transform._TmpInfo instance.
-    op: the `tf.Operation` to be copied.
-    new_inputs: The new inputs for this op.
-    copy_shape: also copy the shape of the tensor
+    op: the node to be copied.
+    new_inputs: The new inputs for this op. Must be tensors within the target
+      graph.
+    copy_shape_and_dtype: also copy the shape and dtype of the tensor. If
+      `False`, shape and dtype will be inferred.
     nodedef_fn: If provided, a function that will be run on the NodeDef
       and should return a mutated NodeDef before a new Operation is created.
       This is useful as certain features cannot be set on the Operation and
@@ -145,17 +152,10 @@ def copy_op_handler(info, op, new_inputs, copy_shape=False, nodedef_fn=None):
   Returns:
     A `(op, op_outputs)` tuple containing the transformed op and its outputs.
   """
-  # The `new_inputs` was added to this function. For compatibility reason,
-  # let's raise an error if `new_inputs` is a boolean.
-  if isinstance(new_inputs, bool):
-    raise TypeError("the `new_inputs` argument must be an iterable.")
+  # Clone the node def
+  node_def_ = op.to_node_def()
 
-  # pylint: disable=protected-access
-
-  # Clone the node def:
-  node_def_ = deepcopy(op.node_def)
-
-  # Transform name:
+  # Transform name
   name_ = info.new_name(op.name)
   name_ = info.graph_.unique_name(name_)
   node_def_.name = name_
@@ -164,30 +164,15 @@ def copy_op_handler(info, op, new_inputs, copy_shape=False, nodedef_fn=None):
   if nodedef_fn is not None:
     node_def_ = nodedef_fn(node_def_)
 
-  # Copy the other inputs needed for initialization
-  output_types_ = op._output_types[:]
-  input_types_ = op._input_types[:]
+  op_ = info.graph_.add_node_from_node_def(node_def_)
 
-  # Make a copy of the op_def too.
-  # Its unique to every _type_ of Operation.
-  op_def_ = deepcopy(op.op_def)
+  # Output type and shape information is not stored in the NodeDef
+  if copy_shape_and_dtype:
+    op_.set_outputs_from_pairs([(t.dtype, t.shape) for t in op.outputs])
+  else:
+    op_.infer_outputs()
 
-  # Initialize a new Operation instance
-  op_ = tf_ops.Operation(node_def_, info.graph_, new_inputs, output_types_,
-                         [], input_types_, None, op_def_)
-
-  # copy the shape over
-  if copy_shape:
-    for t, t_ in zip(op.outputs, op_.outputs):
-      t_.set_shape(t.get_shape())
-
-  # Original op cannot be finalised here yet. Because some ops require this
-  # attribute to exist, we will create a dummy original_op first and then
-  # later finalise it with the actual original_op when all the ops have
-  # been copied.
-  # TODO(fkp): Stop worrying about _original_op and remove this code?
-  if op._original_op:
-    op_._original_op = op._original_op
+  # TODO: Do we need to copy input type information?
 
   return op_, op_.outputs
 
@@ -326,7 +311,7 @@ class _TmpInfo(object):
   argument to the handlers.
   """
 
-  def __init__(self, sgv, dst_graph, dst_scope, src_scope):
+  def __init__(self, sgv, dst_graph: Graph, dst_scope, src_scope):
     self.sgv = sgv
     self.sgv_inputs_set = frozenset(sgv.inputs)
     self.ops = frozenset(sgv.ops)
