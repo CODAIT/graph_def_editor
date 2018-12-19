@@ -14,7 +14,7 @@ TODO: Example usage
 
 **This project is a work in progress.**
 
-Current status: 9 of 50 original regression tests passing.
+Current status: 10 of 50 original regression tests passing.
 
 ## Contents of root directory:
 

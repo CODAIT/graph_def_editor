@@ -20,7 +20,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from copy import deepcopy
 from functools import partial
 from six import iteritems
 from six import iterkeys
@@ -164,15 +163,16 @@ def copy_op_handler(info, op: Node, new_inputs: Iterable[Tensor],
   if nodedef_fn is not None:
     node_def_ = nodedef_fn(node_def_)
 
-  op_ = info.graph_.add_node_from_node_def(node_def_)
-
-  # Output type and shape information is not stored in the NodeDef
+  op_ = info.graph_.add_node_from_node_def(node_def_, set_inputs=False,
+                                           set_control_inputs=False)
+  # Input information in the NodeDef is ignored in favor of the provided new
+  # set of inputs.
+  op_.set_inputs(new_inputs)
+  # Output type and shape information is not stored in the NodeDef.
   if copy_shape_and_dtype:
     op_.set_outputs_from_pairs([(t.dtype, t.shape) for t in op.outputs])
   else:
     op_.infer_outputs()
-
-  # TODO: Do we need to copy input type information?
 
   return op_, op_.outputs
 
@@ -482,22 +482,11 @@ class Transformer(object):
       tf.logging.debug("Connecting control inputs of op: %s", op.name)
       op_ = info.transformed_ops[op]
 
-      # Finalize original op.
-      # TODO(fkp): Stop worrying about _original_op and remove this code?
-      # pylint: disable=protected-access
-      if op._original_op:
-        original_op = self.transform_original_op_handler(info, op._original_op)
-        if original_op is None:
-          tf.logging.debug("Could not find original op for: %s", op_.name)
-        else:
-          op_._original_op = original_op
-      # pylint: enable=protected-access
-
       # Finalize control inputs:
       control_inputs_ = [self.transform_control_input_handler(info, ci)
                          for ci in op.control_inputs]
       control_inputs_ = [ci for ci in control_inputs_ if ci is not None]
-      reroute.add_control_inputs(op_, control_inputs_)
+      op_.set_control_inputs(control_inputs_)
 
   def _transform_sgv(self, info, sgv):
     """Transform a subgraph view.
@@ -506,7 +495,7 @@ class Transformer(object):
     transformed graph.
 
     Args:
-      info: Temporary information for this transorfm call.
+      info: Temporary information for this transform call.
       sgv: the subgraph to be transformed.
     Returns:
       The transformed subgraph.

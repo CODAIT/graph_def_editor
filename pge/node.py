@@ -132,6 +132,33 @@ class Node(object):
     raise NotImplementedError("This method should be implemented by "
                               "subclasses.")
 
+  def get_attr(self, key: str) -> Any:
+    """
+    Retrieve the value of an attribute by name.
+
+    Args:
+      key: Key under which the node's attribute is stored
+
+    Returns:
+      Current value of the attribute as an appropriate native Python type
+      (NOT a `tf.AttrValue` protobuf) or None if no value was found.
+
+    Raises:
+      ValueError if the indicated key does not have an attribute associated
+      with it.
+    """
+    raise NotImplementedError("This method should be implemented by "
+                              "subclasses.")
+
+  def get_attr_keys(self) -> Tuple[str]:
+    """
+    Returns:
+      Tuple (immutable list) of the keys of all attributes currently present
+      in the node
+    """
+    raise NotImplementedError("This method should be implemented by "
+                              "subclasses.")
+
 
 class ImmutableNode(Node):
   """
@@ -166,6 +193,15 @@ class ImmutableNode(Node):
   def control_inputs(self) -> Tuple[Node]:
     # For now, regenerate every time
     return tuple(_decode_control_inputs(self._node_def.input, self._graph))
+
+  def get_attr(self, key: str):
+    if key not in self._node_def.attr:
+      raise ValueError("Node {} does not have an attribute "
+                       "under key '{}'".format(self, key))
+    return _attr_value_to_python_type(self._node_def.attr[key])
+
+  def get_attr_keys(self) -> Tuple[str]:
+    return tuple(self._node_def.attr)
 
   def to_node_def(self):
     return deepcopy(self._node_def)
@@ -213,6 +249,24 @@ class MutableNode(Node):
       raise ValueError("Already have an attribute called '{}'".format(key))
     self._attributes.append((key, value))
 
+  def get_attr(self, key: str):
+    # self._attributes is a list of (key, value) pairs
+    matches = [p[1] for p in self._attributes if p[0] == key]
+    if 0 == len(matches):
+      raise ValueError("Node {} does not have an attribute "
+                       "under key '{}'".format(self, key))
+    elif len(matches) > 1:
+      raise ValueError("Node {} has more than one attribute "
+                       "under key '{}'".format(self, key))
+    ret = matches[0]
+    if isinstance(ret, tf.AttrValue):
+      return _attr_value_to_python_type(ret)
+    else:
+      return ret
+
+  def get_attr_keys(self) -> Tuple[str]:
+    return tuple([p[0] for p in self._attributes])
+
   def clear_attrs(self):
     """
     Remove any attributes that are attached to this node.
@@ -226,13 +280,12 @@ class MutableNode(Node):
   def inputs(self) -> Tuple[tensor.Tensor]:
     return tuple(self._inputs)
 
-  @Node.inputs.setter
   def set_inputs(self, new_inputs: Iterable[tensor.Tensor]):
     """
     Set all inputs at once, removing anything that was there previously.
 
     Args:
-      new_inputs: Iterable of `Tensor` objects on this object's parent graph
+      new_inputs: Iterable of `Tensor` objects in this node's parent graph
     """
     for t in new_inputs:
       if t.graph != self.graph:
@@ -240,6 +293,16 @@ class MutableNode(Node):
                          "different graph {}".format(t, t.graph, self.graph))
     self._inputs = list(new_inputs)
     self._graph.increment_version_counter()  # New edges added to graph
+
+  def set_control_inputs(self, new_control_inputs: Iterable[Node]):
+    """
+    Set all control inputs at once, removing anything that was there
+    previously.
+
+    Args:
+      new_control_inputs: Iterable of `Node` objects in this node's parent graph
+    """
+    self._control_inputs = list(new_control_inputs)
 
   def set_outputs_from_pairs(self, new_outputs: Iterable[Tuple[tf.DType,
                                                                tf.shape]]):
@@ -327,7 +390,7 @@ class MutableNode(Node):
     ret.device = self.device
     for (attr_name, attr_value) in self._attributes:
       # Funky syntax for setting a field of a union in a protobuf
-      ret.attr[attr_name].CopyFrom(_make_attr_value(attr_value))
+      ret.attr[attr_name].CopyFrom(_python_type_to_attr_value(attr_value))
     return ret
 
   def set_device(self, device: str):
@@ -409,7 +472,7 @@ def _decode_control_inputs(inputs: Iterable[str], g: 'graph.Graph') -> List[
   return [g[name] for name in control_input_names]
 
 
-def _make_attr_value(value: Any) -> tf.AttrValue:
+def _python_type_to_attr_value(value: Any) -> tf.AttrValue:
   """
   Convert a Python object or scalar value to a TensorFlow `tf.AttrValue`
   protocol buffer message.
@@ -421,9 +484,9 @@ def _make_attr_value(value: Any) -> tf.AttrValue:
     An AttrValue object that wraps the contents of `value` in the most
     appropriate way available.
   """
-  # TODO: Handle AttrValues that are lists
-
+  # TODO(frreiss): Handle AttrValues that are lists
   if isinstance(value, tf.AttrValue):
+    # TODO(frreiss): Should this case result in an error?
     return value
   # Scalar types, in the order they appear in the .proto file
   elif isinstance(value, str):
@@ -440,7 +503,45 @@ def _make_attr_value(value: Any) -> tf.AttrValue:
     return tf.AttrValue(shape=value.as_proto())
   elif isinstance(value, np.ndarray):
     return tf.AttrValue(tensor=tf.make_tensor_proto(values=value))
-  # TODO: Populate the "func" and "placeholder" fields of the union here
+  # TODO(frreiss): Populate the "func" and "placeholder" fields of the union
+  #  here
   else:
     raise ValueError("Don't know how to convert a {} to "
                      "tf.AttrValue".format(type(value)))
+
+
+def _attr_value_to_python_type(attr_value: tf.AttrValue) -> Any:
+  """
+  Inverse of _python_type_to_attr_value().
+
+  Args:
+    attr_value: Protocol buffer version of a node's attribute value
+
+  Returns:
+    A Python object or built-in type corresponding to the field in
+    `attr_value` that is in use.
+  """
+  # TODO(frreiss): Handle AttrValues that are lists
+  if attr_value.HasField("s"):          # str
+    # TODO(frreiss): Should we return the binary value here?
+    return tf.compat.as_str(attr_value.s)
+  elif attr_value.HasField("i"):        # int
+    return attr_value.i
+  elif attr_value.HasField("f"):        # float
+    return attr_value.f
+  elif attr_value.HasField("b"):        # bool
+    return attr_value.b
+  elif attr_value.HasField("type"):     # DType
+    return tf.DType(attr_value.type)
+  elif attr_value.HasField("shape"):    # TensorShape
+    # Undocumented behavior of public API: tf.TensorShape constructor accepts
+    # a TensorShapeProto.
+    return tf.TensorShape(attr_value.shape)
+  elif attr_value.HasField("tensor"):   # TensorProto
+    return tf.make_ndarray(attr_value.tensor)
+  # TODO(frreiss): Convert the "func" and "placeholder" fields of the union
+  #  here
+  else:
+    raise ValueError("Don't know how to convert AttrValue {} to "
+                     "a Python object".format(attr_value))
+

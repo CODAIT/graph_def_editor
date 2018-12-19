@@ -122,7 +122,10 @@ class Graph(object):
     self.increment_version_counter()
     return ret
 
-  def add_node_from_node_def(self, node_def: tf.NodeDef) -> node.MutableNode:
+  def add_node_from_node_def(self, node_def: tf.NodeDef,
+                             set_inputs: bool = False,
+                             set_control_inputs: bool = False) -> \
+          node.MutableNode:
     """
     Adds a new node to the graph, populating fields of the node from a
     `tf.NodeDef` protocol buffer.
@@ -132,12 +135,20 @@ class Graph(object):
 
     Args:
       node_def: Protocol buffer describing parameters of the new node.
+      set_inputs: If True, populate the node's inputs list from the list of
+        inputs in the `NodeDef`
+      set_control_inputs: Also set control inputs. Must be False if
+        `set_inputs` is False.
 
     Returns:
       `MutableNode` wrapper for the new node
     """
+    if set_control_inputs and not set_inputs:
+      raise ValueError("set_inputs must be True if set_control_inputs is True")
     ret = self.add_node(node_def.name, node_def.op)
-    ret.set_inputs_from_strings(node_def.input, set_control_inputs=True)
+    if set_inputs:
+      ret.set_inputs_from_strings(node_def.input,
+                                  set_control_inputs=set_control_inputs)
     ret.set_device(node_def.device)
     ret.clear_attrs()
     for key in node_def.attr:
@@ -205,7 +216,8 @@ class Graph(object):
     """
     return tuple([n for n in self._immutable_nodes
                   if n.name not in self._deleted_nodes]
-                 + list(self._added_nodes))
+                 + list(self._added_nodes.values()))
+
 
   @property
   def tensors(self):

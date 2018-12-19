@@ -126,15 +126,15 @@ class TransformTest(unittest.TestCase):
     graph = pge.Graph()
     transformer(self.graph, graph, "", "")
 
-    c0_before = self.graph.get_operation_by_name("Const")
-    c0_after = graph.get_operation_by_name("Const")
-    self.assertEquals(c0_before.get_attr("_foo"), b"foo")
+    c0_before = self.graph["Const"]
+    c0_after = graph["Const"]
+    self.assertEqual(c0_before.get_attr("_foo"), "foo")
     with self.assertRaises(ValueError):
       c0_after.get_attr("_foo")
 
-    all_ops = graph.get_operations()
+    all_ops = graph.nodes
     for op in all_ops:
-      self.assertEquals(op.get_attr("_bar"), b"bar")
+      self.assertEqual(op.get_attr("_bar"), "bar")
 
   def test_copy_with_input_replacements(self):
     with self.graph.as_default():
