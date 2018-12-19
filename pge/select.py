@@ -1,3 +1,4 @@
+# Copyright 2018 IBM. All Rights Reserved.
 # Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,6 +25,8 @@ from six import iteritems
 from six import string_types
 import tensorflow as tf
 
+from pge import graph
+from pge import tensor
 from pge import util
 
 __all__ = [
@@ -413,7 +416,7 @@ def get_forward_walk_ops(seed_ops,
     seed_ops = [seed_ops]
   if not seed_ops:
     return []
-  if isinstance(seed_ops[0], tf_ops.Tensor):
+  if isinstance(seed_ops[0], tensor.Tensor):
     ts = util.make_list_of_t(seed_ops, allow_graph=False)
     seed_ops = util.get_consuming_ops(ts)
   else:
@@ -661,14 +664,14 @@ def select_ops(*args, **kwargs):
       expression is used without passing a graph as a keyword argument.
   """
   # get keywords arguments
-  graph = None
+  g = None
   positive_filter = None
   restrict_ops_regex = False
   for k, v in iteritems(kwargs):
     if k == "graph":
-      graph = v
-      if graph is not None and not isinstance(graph, tf_ops.Graph):
-        raise TypeError("Expected a tf.Graph, got: {}".format(type(graph)))
+      g = v
+      if g is not None and not isinstance(g, graph.Graph):
+        raise TypeError("Expected a tf.Graph, got: {}".format(type(g)))
     elif k == "positive_filter":
       positive_filter = v
     elif k == "restrict_ops_regex":
@@ -682,14 +685,14 @@ def select_ops(*args, **kwargs):
 
   for arg in args:
     if can_be_regex(arg):
-      if graph is None:
+      if g is None:
         raise ValueError("Use the keyword argument 'graph' to use regex.")
       regex = make_regex(arg)
       if regex.pattern.startswith("(?#ts)"):
         continue
       if restrict_ops_regex and not regex.pattern.startswith("(?#ops)"):
         continue
-      ops_ = filter_ops_from_regex(graph, regex)
+      ops_ = filter_ops_from_regex(g, regex)
       for op_ in ops_:
         if op_ not in ops:
           if positive_filter is None or positive_filter(op_):

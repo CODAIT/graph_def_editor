@@ -103,21 +103,29 @@ class Graph(object):
     else:
       return self._immutable_nodes[ixs[0]]
 
-  def add_node(self, name: str, op: str) -> node.MutableNode:
+  def add_node(self, name: str, op: str, uniquify_name: bool = True) -> \
+          node.MutableNode:
     """
     Add a new, empty node to the graph.
     Args:
-      name: Unique name for the new op
+      name: Name for the new op
       op: Name of the type of operation for the node
+      uniquify_name: Generate a unique name from this name if the graph
+        already has a node with the indicated name.
 
     Returns:
       `MutableNode` wrapper for the new node.
+
+    Raises:
+      ValueError if the name is already in use and `uniquify_name` is False
     """
-    if self._name_in_use(name):
+    if uniquify_name:
+      name = self.unique_name(name)
+    elif self._name_in_use(name):  # and not uniquify_name
       raise ValueError("Graph already contains a node with name '{}' "
                        "(Note that this check is case-insensitive)."
                        .format(name))
-    ret = node.MutableNode(self, self._get_next_id(), name, op)
+    ret = node.MutableNode(self, self._get_next_id(), name=name, op_name=op)
     self._added_nodes[name] = ret
     self.increment_version_counter()
     return ret

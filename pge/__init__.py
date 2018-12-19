@@ -25,6 +25,7 @@ from __future__ import print_function
 # pylint: disable=wildcard-import
 from pge.edit import *
 from pge.graph import *
+from pge.match import *
 from pge.node import *
 from pge.reroute import *
 from pge.select import *

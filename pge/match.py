@@ -1,3 +1,4 @@
+# Copyright 2018 IBM. All Rights Reserved.
 # Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +23,8 @@ from six import string_types
 
 import tensorflow as tf
 
-import pge
+from pge import node
+from pge import select
 
 __all__ = [
     "op_type",
@@ -86,8 +88,8 @@ class OpMatcher(object):
 
   def __call__(self, op):
     """Evaluate if the op matches or not."""
-    if not isinstance(op, tf_ops.Operation):
-      raise TypeError("Expect tf.Operation, got: {}".format(type(op)))
+    if not isinstance(op, node.Node):
+      raise TypeError("Expect pge.Node, got: {}".format(type(op)))
     for positive_filter in self.positive_filters:
       if not positive_filter(op):
         return False
@@ -97,7 +99,7 @@ class OpMatcher(object):
       for input_t, input_op_match in zip(op.inputs, self.input_op_matches):
         if input_op_match is None:
           continue
-        if not input_op_match(input_t.op):
+        if not input_op_match(input_t.operator):
           return False
     if self.control_input_op_matches is not None:
       if len(op.control_inputs) != len(self.control_input_op_matches):

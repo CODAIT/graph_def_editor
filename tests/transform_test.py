@@ -41,7 +41,7 @@ class TransformTest(unittest.TestCase):
       c1 = tf.constant(1.0, shape=[10], name="Const")
       c2 = tf.constant(1.0, shape=[10], name="Const")
       i = tf.constant(1.0, shape=[10], name="Input")
-      tf.add(c2, tf.add(c1, tf.add(c0, i)), name="o")
+      tf.identity(tf.add(c2, tf.add(c1, tf.add(c0, i))), name="o")
     self.graph = pge.Graph(tf_graph)
     self.o = self.graph["o"]
 
@@ -81,33 +81,50 @@ class TransformTest(unittest.TestCase):
     self.assertIsNotNone(new_assert_op)
 
   def test_transform(self):
-    transformer = ge.Transformer()
+    transformer = pge.Transformer()
 
     def my_transform_op_handler(info, op, new_inputs):
       add_noise = op.name.startswith("Add")
-      op_, op_outputs_ = ge.transform.copy_op_handler(info, op, new_inputs)
+      op_, op_outputs_ = pge.transform.copy_op_handler(info, op, new_inputs)
       if not add_noise:
         return op_, op_outputs_
+
       # add some noise to op
-      with info.graph_.as_default():
-        t_ = math_ops.add(
-            constant_op.constant(1.0, shape=[10], name="Noise"),
-            op_.outputs[0],
-            name="AddNoise")
+      # Old code:
+      # with info.graph_.as_default():
+      #   t_ = math_ops.add(
+      #       constant_op.constant(1.0, shape=[10], name="Noise"),
+      #       op_.outputs[0],
+      #       name="AddNoise")
+      noise_op = info.graph_.add_node("Noise", "Const")
+      noise_op.add_attr("dtype", tf.float32)
+      noise_op.add_attr("value", np.repeat(1., 10))
+      noise_op.infer_outputs()
+      add_noise_op = info.graph_.add_node("AddNoise", "Add")
+      add_noise_op.add_attr("T", tf.float32)
+      add_noise_op.set_inputs([noise_op.outputs[0], op_.outputs[0]])
+      #import textwrap
+      #print("add_noise_op.to_node_def() returns:\n{}".format(
+      #  textwrap.indent(str(add_noise_op.to_node_def()), "  ")))
+      add_noise_op.infer_outputs()
+      t_ = add_noise_op.outputs[0]
+
       # return the "noisy" op
       return op_, [t_]
 
     transformer.transform_op_handler = my_transform_op_handler
 
-    graph = ops.Graph()
+    graph = pge.Graph()
     transformer(self.graph, graph, "", "")
-    matcher0 = match.OpMatcher("AddNoise").input_ops(
-        "Noise", match.OpMatcher("Add").input_ops("Const", "Input"))
-    matcher1 = match.OpMatcher("AddNoise_1").input_ops(
-        "Noise_1", match.OpMatcher("Add_1").input_ops("Const_1", matcher0))
-    matcher2 = match.OpMatcher("AddNoise_2").input_ops(
-        "Noise_2", match.OpMatcher("Add_2").input_ops("Const_2", matcher1))
-    top = ge.select_ops("^AddNoise_2$", graph=graph)[0]
+    print("self.graph nodes are: {}".format([n.name for n in self.graph.nodes]))
+    print("Graph nodes are: {}".format([n.name for n in graph.nodes]))
+    matcher0 = pge.OpMatcher("AddNoise").input_ops(
+        "Noise", pge.OpMatcher("Add").input_ops("Const", "Input"))
+    matcher1 = pge.OpMatcher("AddNoise_1").input_ops(
+        "Noise_1", pge.OpMatcher("Add_1").input_ops("Const_1", matcher0))
+    matcher2 = pge.OpMatcher("AddNoise_2").input_ops(
+        "Noise_2", pge.OpMatcher("Add_2").input_ops("Const_2", matcher1))
+    top = pge.select_ops("^AddNoise_2$", graph=graph)[0]
     self.assertTrue(matcher2(top))
 
   def test_transform_nodedef_fn(self):

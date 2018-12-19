@@ -498,7 +498,7 @@ def _python_type_to_attr_value(value: Any) -> tf.AttrValue:
   elif isinstance(value, bool):
     return tf.AttrValue(b=value)
   elif isinstance(value, tf.DType):
-    return tf.AttrValue(type=value.as_datatype_enum())
+    return tf.AttrValue(type=value.as_datatype_enum)
   elif isinstance(value, tf.TensorShape):
     return tf.AttrValue(shape=value.as_proto())
   elif isinstance(value, np.ndarray):
