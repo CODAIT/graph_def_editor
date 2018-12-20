@@ -102,7 +102,7 @@ class UtilTest(unittest.TestCase):
     # Should extract the tensors and ignore the ops.
     self.assertEqual(
         len(pge.util.make_list_of_t(
-            (a0, a0.operator, b0), ignore_ops=True)), 2)
+            (a0, a0.node, b0), ignore_ops=True)), 2)
 
   def test_get_generating_consuming(self):
     """Test for pge.util.get_generating_ops and pge.util.get_generating_ops."""

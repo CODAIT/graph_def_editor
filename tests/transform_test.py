@@ -253,24 +253,32 @@ class TransformTest(unittest.TestCase):
     self.assertNear(res_val, 0.0, ERROR_TOLERANCE)
 
   def test_graph_while_loop(self):
-    graph = ops.Graph()
-    with graph.as_default():
-      max_index = array_ops.placeholder(dtype=dtypes.int32, shape=tuple())
-      index_start = constant_op.constant(1)
-      sum_start = constant_op.constant(0)
-      _, result = control_flow_ops.while_loop(
+    tf_graph = tf.Graph()
+    with tf_graph.as_default():
+      max_index = tf.placeholder(dtype=tf.int32, shape=tuple())
+      index_start = tf.constant(1)
+      sum_start = tf.constant(0)
+      _, result = tf.while_loop(
           cond=lambda i, unused_s: i <= max_index,
           body=lambda i, s: (i + 1, s + i),
           loop_vars=[index_start, sum_start])
-    copied_graph = ops.Graph()
-    _, copy_info = ge.copy(
-        graph, dst_graph=copied_graph, dst_scope="imported")
-    copied_result = copy_info.transformed(result)
-    copied_max_index = copy_info.transformed(max_index)
-    with copied_graph.as_default():
-      with session.Session() as sess:
+    g = pge.Graph(tf_graph)
+    result_tensor = g[result.op.name].output(0)
+    max_index_tensor = g[max_index.op.name].output(0)
+
+    copied_graph = pge.Graph()
+    _, copy_info = pge.copy(
+        g, dst_graph=copied_graph, dst_scope="imported")
+    copied_result_tensor = copy_info.transformed(result_tensor)
+    copied_max_index_tensor = copy_info.transformed(max_index_tensor)
+
+    tf_copied_graph = tf.Graph()
+    with tf_copied_graph.as_default():
+      tf.import_graph_def(copied_graph.to_graph_def())
+      with tf.Session() as sess:
         n = 10
-        sum_val = sess.run(copied_result, feed_dict={copied_max_index: n})
+        sum_val = sess.run(copied_result_tensor.name,
+                           feed_dict={copied_max_index_tensor.name: n})
         self.assertEqual(sum_val, 55)
 
   def test_graph_cond(self):

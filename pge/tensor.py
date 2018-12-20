@@ -41,7 +41,7 @@ class Tensor(object):
     self._shape = shape
 
   @property
-  def operator(self):
+  def node(self):
       return self._node
 
   @property
@@ -64,7 +64,7 @@ class Tensor(object):
   @property
   def graph(self):
     """Returns the `pge.Graph` object representing the graph in which the
-    operator that produces this tensor resides."""
+    node that produces this tensor resides."""
     return self._node.graph
 
   @property
@@ -90,6 +90,6 @@ class Tensor(object):
       "<op>:<output index>" (other outputs)
     """
     if 0 == self.value_index:
-      return self.operator.name
+      return self.node.name
     else:
-      return "{}:{}".format(self.operator.name, self.value_index)
+      return "{}:{}".format(self.node.name, self.value_index)

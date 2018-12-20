@@ -54,12 +54,12 @@ class Node(object):
   def name(self):
     """
     Returns:
-       Unique name of the operator that this Node represents
+       Unique name of the node that this Node represents
     """
     return self._name
 
   @property
-  def op_name(self):
+  def op_type(self):
     """
     Returns:
       Name of the TensorFlow op type that this Node represents
@@ -280,6 +280,29 @@ class MutableNode(Node):
   def inputs(self) -> Tuple[tensor.Tensor]:
     return tuple(self._inputs)
 
+  def replace_input(self, index: int, new_input: tensor.Tensor):
+    """
+    Replace an existing input of this node with the specified tensor. Roughly
+    equivalent to `tf.Operator._update_input()`.
+
+    Does NOT change the output type or shape of the node. You may need to
+    call `infer_outputs()` or `set_outputs_from_pairs()` to update the node's
+    output type information after changing an input with this method.
+
+    Args:
+      index: Index of input to replace. Note that this index is an offset into
+        the data inputs, NOT the control inputs, of the node.
+      new_input: The replacement input
+
+    Raises:
+      IndexError if index does not correspond to an existing input.
+    """
+    if index < 0 or index >= len(self._inputs):
+      raise IndexError("Received input index {}, but node has {} "
+                       "inputs".format(index, len(self._inputs)))
+    self._inputs[index] = new_input
+    self._graph.increment_version_counter()
+
   def set_inputs(self, new_inputs: Iterable[tensor.Tensor]):
     """
     Set all inputs at once, removing anything that was there previously.
@@ -311,7 +334,7 @@ class MutableNode(Node):
 
     Note that information about outputs is not stored in the serialized graph.
     When instantiating a serialized graph, TensorFlow will use its own shape
-    inference to infer the number, type, and shape of the operator's outputs.
+    inference to infer the number, type, and shape of the node's outputs.
 
     Args:
       new_outputs: Iterable of (dtype, shape) pairs that describe the outputs
@@ -382,7 +405,7 @@ class MutableNode(Node):
   def to_node_def(self):
     ret = tf.NodeDef()
     ret.name = self.name
-    ret.op = self.op_name
+    ret.op = self.op_type
     for input_tensor in self.inputs:
       ret.input.append(input_tensor.name)
     for control_input_node in self.control_inputs:
@@ -405,7 +428,7 @@ def _canonicalize_output_name(name: str):
   """
   Args:
     name: Name for an op output as it would appear in the protocol buffer
-      representation of a an operator graph
+      representation of a an node graph
   Returns:
     A name in the form "<op name>:<output index>"
   """

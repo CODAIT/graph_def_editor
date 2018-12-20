@@ -435,14 +435,14 @@ class SubGraphView(object):
     return res
 
   def find_op_by_name(self, op_name):
-    """Return the op named op_name.
+    """Return the op named op_type.
 
     Args:
       op_name: the name to search for
     Returns:
-      The op named op_name.
+      The op named op_type.
     Raises:
-      ValueError: if the op_name could not be found.
+      ValueError: if the op_type could not be found.
       AssertionError: if the name was found multiple time.
     """
     res = [op for op in self._ops if op.name == op_name]

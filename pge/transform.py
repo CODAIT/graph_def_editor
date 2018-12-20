@@ -30,7 +30,7 @@ from typing import Tuple, List, Iterable
 
 from pge import subgraph
 from pge import util
-from pge.node import Node
+from pge.node import Node, MutableNode, ImmutableNode
 from pge.graph import Graph
 from pge.tensor import Tensor
 
@@ -474,7 +474,7 @@ class Transformer(object):
       t_ = info.transformed_ts[t]
       consumer_op_ = info.transformed_ops[consumer_op]
       t_index_ = list(consumer_op_.inputs).index(tmp_t_)
-      consumer_op_._update_input(t_index_, t_)  # pylint: disable=protected-access
+      consumer_op.replace_input(t_index_, t_)
 
   def _connect_control_inputs(self, info):
     """Connect the previously copied ops."""
@@ -538,23 +538,23 @@ class Transformer(object):
     if t in info.sgv_inputs_set:
       # `t` is an input of the subgraph.
       return self.transform_external_input_handler(info, t)
-    elif t.op in info.ops:
+    elif t.node in info.ops:
       # `t` is an internal tensor but is not transformed yet because it
       # belongs to a graph cycle.
-      logging.debug("Cyclic tensor: t.name = %s", t.name)
+      tf.logging.debug("Cyclic tensor: t.name = %s", t.name)
       # Try to find an existing tensor we can use for now,
       # otherwise create one. We'll rewire this later.
-      if consumer_op.type == "Merge":
+      if consumer_op.op_type == "Merge":
         first_input = consumer_op.inputs[0]
         tmp_t_ = self._transformed_t(info, first_input, consumer_op)
-      elif t.op.type == "Enter":
-        enter_input = t.op.inputs[0]
+      elif t.node.op_type == "Enter":
+        enter_input = t.node.inputs[0]
         tmp_t_ = self._transformed_t(info, enter_input, consumer_op)
       else:
         with info.graph_.as_default():
           tmp_t_ = util.make_placeholder_from_tensor(t, scope=info.scope_,
                                                      prefix="geph_tmp")
-        logging.debug("Created temporary placeholder: %s.", tmp_t_.name)
+        tf.logging.debug("Created temporary placeholder: %s.", tmp_t_.name)
       # Register as temporary and return.
       info.tmp_cyclic_ts.append((t, tmp_t_, consumer_op))
       return tmp_t_
@@ -583,15 +583,15 @@ def copy(sgv, dst_graph=None, dst_scope="", src_scope="",
       information about the transform, including mapping between
       original and transformed tensors and operations.
   Raises:
-    TypeError: if `dst_graph` is not a `tf.Graph`.
+    TypeError: if `dst_graph` is not a `pge.Graph`.
     StandardError: if sgv cannot be converted to a SubGraphView using
       the same rules than the function subgraph.make_view.
   """
   sgv = subgraph.make_view(sgv)
   if dst_graph is None:
     dst_graph = sgv.graph
-  if not isinstance(dst_graph, tf_ops.Graph):
-    raise TypeError("Expected a tf.Graph, got: {}".format(type(dst_graph)))
+  if not isinstance(dst_graph, Graph):
+    raise TypeError("Expected a pge.Graph, got: {}".format(type(dst_graph)))
 
   copier = Transformer()
   return copier(

@@ -238,7 +238,7 @@ def get_generating_ops(ts):
     TypeError: if `ts` cannot be converted to a list of `pge.Tensor`.
   """
   ts = make_list_of_t(ts, allow_graph=False)
-  return [t.operator for t in ts]
+  return [t.node for t in ts]
 
 
 def get_consuming_ops(ts):
@@ -356,8 +356,8 @@ def placeholder_name(t=None, scope=None, prefix=_DEFAULT_PLACEHOLDER_PREFIX):
   if t is not None:
     if not isinstance(t, tensor.Tensor):
       raise TypeError("Expected a pge.Tensor, got: {}".format(type(t)))
-    op_dirname = scope_dirname(t.operator.name)
-    op_basename = scope_basename(t.operator.name)
+    op_dirname = scope_dirname(t.node.name)
+    op_basename = scope_basename(t.node.name)
     if scope is None:
       scope = op_dirname
 

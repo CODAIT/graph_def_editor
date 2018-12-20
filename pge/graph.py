@@ -54,7 +54,7 @@ class Graph(object):
 
     Args:
       graph: a tf.Graph or tf.GraphDef protobuf that represents a
-        TensorFlow operator graph. If set to None, generate an empty
+        TensorFlow graph. If set to None, generate an empty
         tf.GraphDef
     """
     if graph is None:
@@ -226,16 +226,26 @@ class Graph(object):
                   if n.name not in self._deleted_nodes]
                  + list(self._added_nodes.values()))
 
-
   @property
   def tensors(self):
-    """Return a list of all the tensors which are input or output of an op in
+    """
+    Return a list of all the tensors which are input or output of an op in
     the graph.
     """
     ts = []
     for op in self.nodes:
       ts += op.outputs
     return ts
+
+  def to_graph_def(self):
+    """
+    Returns the `tf.GraphDef` serialization of this graph in its current
+    form.
+    """
+    ret = tf.GraphDef()
+    for op in self.nodes:
+      ret.node.append(op.to_node_def())
+    return ret
 
   @property
   def version(self):
@@ -286,14 +296,14 @@ def _decode_graph(graph_def):
   generally keeps to itself.
 
   Args:
-    graph_def: tf.GraphDef protobuf that represents a TensorFlow operator graph.
+    graph_def: tf.GraphDef protobuf that represents a TensorFlow graph.
       This graph must be runnable on the current version of TensorFlow;
       otherwise some of the type inference operations that this function
       performs will fail.
 
   Returns:
-    A map from operator name to a list of (type, shape) pairs that describe
-    in turn each of the outputs of said operator.
+    A map from node name to a list of (type, shape) pairs that describe
+    in turn each of the outputs of said node.
   """
   # The information in a NodeDef is not sufficient to determine output type
   # information. For that kind of type inference, you need access to the
@@ -303,13 +313,8 @@ def _decode_graph(graph_def):
   # a reduction in forwards compatibility, because import_graph_def() does a
   # lot of sanity checks that aren't necessary when rewriting a graph_def.
   temp_graph = tf.Graph()
-  # tf.import_graph_def() insists on prepending a prefix onto the name of every
-  # node it imports. There's no way to turn this functionality off, so use a
-  # known prefix.
-  _PREFIX = "pge_import"
   with temp_graph.as_default():
-    tf.import_graph_def(graph_def, name=_PREFIX)
-  output_map = {op.name[(len(_PREFIX) + 1):]: [(t.dtype, t.shape)
-                                               for t in op.outputs]
+    tf.import_graph_def(graph_def, name="")
+  output_map = {op.name: [(t.dtype, t.shape) for t in op.outputs]
                 for op in temp_graph.get_operations()}
   return output_map

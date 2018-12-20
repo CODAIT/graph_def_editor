@@ -99,7 +99,7 @@ class OpMatcher(object):
       for input_t, input_op_match in zip(op.inputs, self.input_op_matches):
         if input_op_match is None:
           continue
-        if not input_op_match(input_t.operator):
+        if not input_op_match(input_t.node):
           return False
     if self.control_input_op_matches is not None:
       if len(op.control_inputs) != len(self.control_input_op_matches):
