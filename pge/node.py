@@ -18,40 +18,60 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from copy import deepcopy
-import numpy as np
 import tensorflow as tf
 from typing import Tuple, List, Iterable, Any
 
 from pge import graph
 from pge import tensor
+from pge import util
+
+# Magical attribute name that TensorFlow uses to store colocation groups.
+# See colocation_groups property below for more information.
+_COLOCATION_ATTR_NAME = "_class"
+
+# Magical prefix that TensorFlow appends to node names to create colocation
+# group names.
+_COLOCATION_PREFIX = "loc:@"
 
 __all__ = [
     "Node",
-    "ImmutableNode",
-    "MutableNode",
 ]
 
 
 class Node(object):
   """
-  Public API for interacting with graph nodes
+  Mutable surrogate for a `tf.NodeDef` protocol buffer message.
+  Accumulates the parameters of the node and can produce an appropriate
+  tf.NodeDef protobuf on demand.
   """
-  def __init__(self, g: 'graph.Graph', node_id: int, name: str,
-               op_name: str, outputs: List[tensor.Tensor],
-               device: str):
+  def __init__(self, g: 'graph.Graph', node_id: int, name: str, op_name: str,
+               device: str = ""):
     """
-    This constructor should only be called by subclasses.
+    This constructor should only be called from methods of the Graph
+    class.
+
+    Args:
+      g: The graph that this node is to be added to. The caller is
+        responsible for adding the node to the graph.
+      node_id: Unique (within the parent graph) integer identifier for the node
+      name: Name of the new node to add
+      op_name: Name of the operation that the new node will perform
+      device: TensorFlow device specification string indicating where this node
+        should be located. Default value of "" means "use the default device"
     """
     self._graph = g
     self._id = node_id
     self._name = name
     self._op_name = op_name
-    self._outputs = outputs
     self._device = device
+    self._attributes = []
+    self._inputs = []
+    self._outputs = []
+    self._control_inputs = []
+    self._colocation_groups = []
 
   @property
-  def name(self):
+  def name(self) -> str:
     """
     Returns:
        Unique name of the node that this Node represents
@@ -59,7 +79,7 @@ class Node(object):
     return self._name
 
   @property
-  def op_type(self):
+  def op_type(self) -> str:
     """
     Returns:
       Name of the TensorFlow op type that this Node represents
@@ -67,12 +87,20 @@ class Node(object):
     return self._op_name
 
   @property
-  def graph(self):
+  def graph(self) -> 'graph.Graph':
     """
     Returns:
       `pge.Graph` object representing the graph in which this Node resides.
     """
     return self._graph
+
+  @property
+  def id_in_graph(self) -> int:
+    """
+    Returns this node's unique integer id within the parent graph. Useful for
+    sorting nodes in an arbitrary but consistent order.
+    """
+    return self._id
 
   @property
   def outputs(self):
@@ -98,186 +126,9 @@ class Node(object):
     """
     Returns:
       Tuple (i.e. immutable list) of `pge.Tensor` objects representing the
-      current inputs of this node.
+      current inputs of this node. Note that the returned value is immutable
+      for a reason. Do not attempt to modify it.
     """
-    raise NotImplementedError("This method should be implemented by "
-                              "subclasses.")
-
-  @property
-  def control_inputs(self) -> Tuple['Node']:
-    """
-    Returns:
-      Tuple (i.e. immutable list) of `pge.Node` objects representing the
-      nodes that have control edges to this node.
-    """
-    raise NotImplementedError("This method should be implemented by "
-                              "subclasses.")
-
-  @property
-  def device(self):
-    """
-    Returns:
-      TensorFlow device placement string desribing where this node should be
-      placed, or None to specify use of the default device.
-    """
-    return self._device
-
-  def to_node_def(self):
-    """
-    Returns:
-        A copy of the contents of this node as a NodeDef proto. The returned
-        proto will *not* change if this node is changed after the call, and
-        vice versa.
-    """
-    raise NotImplementedError("This method should be implemented by "
-                              "subclasses.")
-
-  def get_attr(self, key: str) -> Any:
-    """
-    Retrieve the value of an attribute by name.
-
-    Args:
-      key: Key under which the node's attribute is stored
-
-    Returns:
-      Current value of the attribute as an appropriate native Python type
-      (NOT a `tf.AttrValue` protobuf) or None if no value was found.
-
-    Raises:
-      ValueError if the indicated key does not have an attribute associated
-      with it.
-    """
-    raise NotImplementedError("This method should be implemented by "
-                              "subclasses.")
-
-  def get_attr_keys(self) -> Tuple[str]:
-    """
-    Returns:
-      Tuple (immutable list) of the keys of all attributes currently present
-      in the node
-    """
-    raise NotImplementedError("This method should be implemented by "
-                              "subclasses.")
-
-
-class ImmutableNode(Node):
-  """
-  Wrapper for tf.NodeDef. Also maintains a pointer back to wrapper object for 
-  the original graph.
-  """
-
-  def __init__(self, g: 'graph.Graph', node_id: int, node_def: tf.NodeDef,
-               outputs_list: List[Tuple[tf.DType, tf.shape]]):
-    """
-    Args:
-      g: pge.Graph object that represents the parent graph
-      node_id: Unique (within parent graph) integer identifier for this node
-      node_def: tf.NodeDef protobuf 
-      outputs_list: List of (type, shape) pairs that describe the outputs of 
-        this node
-    """
-    Node.__init__(self, g, node_id=node_id, name=node_def.name,
-                  op_name=node_def.op,
-                  outputs=[tensor.Tensor(self, i, outputs_list[i][0],
-                                         outputs_list[i][1])
-                           for i in range(len(outputs_list))],
-                  device=node_def.device)
-    self._node_def = node_def
-
-  @Node.inputs.getter
-  def inputs(self) -> Tuple[tensor.Tensor]:
-    # Regenerate each time for now.
-    return tuple(_decode_inputs(self._node_def.input, self._graph))
-
-  @Node.control_inputs.getter
-  def control_inputs(self) -> Tuple[Node]:
-    # For now, regenerate every time
-    return tuple(_decode_control_inputs(self._node_def.input, self._graph))
-
-  def get_attr(self, key: str):
-    if key not in self._node_def.attr:
-      raise ValueError("Node {} does not have an attribute "
-                       "under key '{}'".format(self, key))
-    return _attr_value_to_python_type(self._node_def.attr[key])
-
-  def get_attr_keys(self) -> Tuple[str]:
-    return tuple(self._node_def.attr)
-
-  def to_node_def(self):
-    return deepcopy(self._node_def)
-
-
-class MutableNode(Node):
-  """
-  Wrapper for a change to a graph that will add a node. Accumulates the
-  parameters of the node to be added and can produce an appropriate
-  tf.NodeDef protobuf on demand.
-  """
-
-  def __init__(self, g: 'graph.Graph', node_id: int, name: str, op_name: str,
-               device: str = ""):
-    """
-    This constructor should only be called from methods of the Graph
-    class.
-
-    Args:
-      g: The graph that this node is to be added to. The caller is
-        responsible for adding the node to the graph.
-      node_id: Unique (within the parent graph) integer identifier for the node
-      name: Name of the new node to add
-      op_name: Name of the operation that the new node will perform
-      device: TensorFlow device specification string indicating where this node
-        should be located. Default value of "" means "use the default device"
-    """
-    Node.__init__(self, g, node_id=node_id, name=name,
-                  op_name=op_name, outputs=[], device=device)
-    self._attributes = []
-    self._inputs = []
-    self._control_inputs = []
-
-  def add_attr(self, key: str, value):
-    """Add a single attribute to the underlying NodeDef's attr list.
-
-    Args:
-      key: Name of the attribute. Must be unique.
-      value: Value to put in place for the attribute. Must be one of the
-        following types:
-        * tf.DType
-        * tf.TensorShape
-    """
-    if key in self._attr_names():
-      raise ValueError("Already have an attribute called '{}'".format(key))
-    self._attributes.append((key, value))
-
-  def get_attr(self, key: str):
-    # self._attributes is a list of (key, value) pairs
-    matches = [p[1] for p in self._attributes if p[0] == key]
-    if 0 == len(matches):
-      raise ValueError("Node {} does not have an attribute "
-                       "under key '{}'".format(self, key))
-    elif len(matches) > 1:
-      raise ValueError("Node {} has more than one attribute "
-                       "under key '{}'".format(self, key))
-    ret = matches[0]
-    if isinstance(ret, tf.AttrValue):
-      return _attr_value_to_python_type(ret)
-    else:
-      return ret
-
-  def get_attr_keys(self) -> Tuple[str]:
-    return tuple([p[0] for p in self._attributes])
-
-  def clear_attrs(self):
-    """
-    Remove any attributes that are attached to this node.
-    """
-    self._attributes.clear()
-
-  def _attr_names(self):
-    return [a[0] for a in self._attributes]
-
-  @Node.inputs.getter
-  def inputs(self) -> Tuple[tensor.Tensor]:
     return tuple(self._inputs)
 
   def replace_input(self, index: int, new_input: tensor.Tensor):
@@ -317,7 +168,288 @@ class MutableNode(Node):
     self._inputs = list(new_inputs)
     self._graph.increment_version_counter()  # New edges added to graph
 
-  def set_control_inputs(self, new_control_inputs: Iterable[Node]):
+  @property
+  def control_inputs(self) -> Tuple['Node']:
+    """
+    Returns:
+      Tuple (i.e. immutable list) of `pge.Node` objects representing the
+      nodes that have control edges to this node.
+    """
+    return tuple(self._control_inputs)
+
+  @property
+  def device(self) -> str:
+    """
+    Returns:
+      TensorFlow device placement string describing where this node should be
+      placed, or None to specify use of the default device.
+    """
+    return self._device
+
+  @device.setter
+  def device(self, value: str):
+    self._device = value
+
+  @property
+  def colocation_groups(self) -> List[str]:
+    """
+    **A word about colocation groups:**
+
+    TensorFlow constrains some operators to be located on the same device
+    as each other. The mechanism that TensorFlow uses to enforce these
+    constraints is poorly documented, but I've pieced together the following
+    by reading through source code.
+
+    Every TensorFlow operator belongs to one or more colocation groups. Each
+    such group has a name that takes the form "loc:@<operator name>",
+    where <operator name> is the full name of an operator in the same graph.
+    By default, every operator is a member of its own colocation group. An op
+    can also be a member of any number of other ops' groups.
+
+    At graph creation time, some internal TensorFlow functions use the
+    `tf.colocate_with()` context manager (defined in
+    `tensorflow/python/framework/ops.py`) to add colocation constraints to
+    generated ops.  At runtime, TensorFlow's placement algorithms perform the
+    necessary set-cover computations to force every member of every
+    colocation group to be on the same device.
+
+    When TensorFlow serializes a graph, the system shoehorns information about
+    colocation into the `tf.NodeDef` protocol buffer messages that make up
+    the `tf.GraphDef`. The implicit membership of an operator in its own
+    colocation group is *not* stored anywhere in the NodeDef; the user just
+    needs to know that every node "N" is a member of the colocation group
+    "loc:@N". Other additional colocation groups are stored in an attribute
+    called "_class" (a name apparently chosen to confuse the enemy) as a list
+    of strings. Here's an example from a call to `tf.while_loop()`:
+
+    ```
+    node {
+      name: "while/Switch"
+      op: "Switch"
+      input: "while/Merge"
+      input: "while/LoopCond"
+      attr {
+        key: "T"
+        value {
+          type: DT_INT32
+        }
+      }
+      attr {
+        key: "_class"
+        value {
+          list {
+            s: "loc:@while/Merge"
+          }
+        }
+      }
+    }
+    ```
+
+    This class, `Node`, internally stores colocation groups as a list of node
+    names. Currently, we do *not* store the node's own implicit colocation
+    group in this list. The `to_node_def()` method generates the "_class"
+    attr as appropriate.
+
+    Some important notes:
+    * TensorFlow will refuse to load a `GraphDef` if any nodes contain
+      references to nonexistent nodes in their collocation group attributes.
+      When renaming a node, be sure to rename any colocation groups that
+      reference the node.
+    * In principle, it should be possible to store things in the "_class"
+      attribute other than colocation groups; simply avoid using strings that
+      start with the magic prefix "loc:@". In practice, using the "_class"
+      attribute in this way is a bad idea, and this class will raise an
+      exception if you attempt to do so.
+    * It's unclear what happens if there are conflicting "device" directives in
+      nodes that share a colocation group. It's best to ensure that that
+      situation doesn't happen.
+    * Yes, it's supposed to be spelled "collocate"/"collocation", but the
+      misspelling "colocate" is thoroughly entrenched in the tech community.
+
+    Returns:
+      Names of other Nodes that this Node is constrained to be collocated
+      with. *Does NOT return this Node's "default" colocation group.*
+      *Does NOT return node names prefixed with "loc:@".
+      Modifications to the returned tuple will NOT be reflected in the Node.
+      Use `add_colocation_group` and the setter for this property if you wish
+      to modify a node's colocation group information.
+    """
+    return tuple(self._colocation_groups)
+
+  @colocation_groups.setter
+  def colocation_groups(self, value: Iterable[str]):
+    """
+    Setter for the `colocation_groups` property.
+
+    @param value: New set of colocation groups, superseding the current set.
+
+    Raises:
+      ValueError if any of the colocation groups reference
+    """
+    for s in value:
+      if not self._graph.contains_node(s):
+        raise ValueError("Graph does not contain a node with name '{}'".format(
+          s))
+    self._colocation_groups = value
+    # TODO(frreiss): Invalidate any cached information that the parent Graph
+    #  may have generated about colocation constraints.
+
+  def add_colocation_group(self, head_node_name: str, validate: bool = True):
+    """
+    Add a new colocation group to this Node.
+
+    See the docstring for the `colocation_groups` property for more
+    information about colocation groups.
+
+    Args:
+      head_node_name: Name of the node in the graph that serves as the
+        "primary" node in the group. By convention, the name of the group will
+        be "loc:@<head_node_name>".
+      validate: If True, verify that the target node exists in the parent graph.
+
+    Raises:
+      ValueError if there is a problem with `head_node_name`
+    """
+    # TODO(frreiss): Invalidate any cached information that the parent Graph
+    #  may have generated about colocation constraints.
+    if validate and not self._graph.contains_node(head_node_name):
+        raise ValueError("Graph does not contain a node with name '{}'".format(
+          head_node_name))
+    if head_node_name in self._colocation_groups:
+      raise ValueError("Already have colocation group with '{}'".format(
+        head_node_name))
+    self._colocation_groups.append(head_node_name)
+
+  def to_node_def(self, target: tf.NodeDef = None):
+    """
+    Args:
+      target: optional preallocated, empty NodeDef object to fill in. If not
+        provided, this method will allocate a new `tf.NodeDef` object.
+    Returns:
+        A copy of the contents of this node as a NodeDef proto. The returned
+        proto will *not* change if this node is changed after the call, and
+        vice versa.
+    """
+    if target is None:
+      target = tf.NodeDef()
+    target.name = self.name
+    target.op = self.op_type
+    for input_tensor in self.inputs:
+      target.input.append(input_tensor.name)
+    for control_input_node in self.control_inputs:
+      target.input.append("^" + control_input_node.name)
+    target.device = self.device
+    for (attr_name, attr_value) in self._attributes:
+      # Funky syntax for setting a field of a union in a protobuf
+      target.attr[attr_name].CopyFrom(
+        util.python_type_to_attr_value(attr_value))
+    if len(self._colocation_groups) > 0:
+      # Serialize colocation groups. See docstring in getter for
+      # colocation_groups property for more information.
+      transformed_names = [_COLOCATION_PREFIX + name
+                           for name in self._colocation_groups]
+      target.attr["_class"].CopyFrom(
+        util.python_type_to_attr_value(transformed_names)
+      )
+    return target
+
+  def get_attr(self, key: str) -> Any:
+    """
+    Retrieve the value of an attribute by name.
+
+    Args:
+      key: Key under which the node's attribute is stored
+
+    Returns:
+      Current value of the attribute as an appropriate native Python type
+      (NOT a `tf.AttrValue` protobuf) or None if no value was found.
+
+    Raises:
+      ValueError if the indicated key does not have an attribute associated
+      with it.
+    """
+    # self._attributes is a list of (key, value) pairs
+    matches = [p[1] for p in self._attributes if p[0] == key]
+    if 0 == len(matches):
+      raise ValueError("Node {} does not have an attribute "
+                       "under key '{}'".format(self, key))
+    elif len(matches) > 1:
+      raise ValueError("Node {} has more than one attribute "
+                       "under key '{}'".format(self, key))
+    ret = matches[0]
+    if isinstance(ret, tf.AttrValue):
+      return util.attr_value_to_python_type(ret)
+    else:
+      return ret
+
+  def get_attr_keys(self) -> Tuple[str]:
+    """
+    Returns:
+      Tuple (immutable list) of the keys of all attributes currently present
+      in the node
+    """
+    return tuple([p[0] for p in self._attributes])
+
+  def add_attr(self, key: str, value: Any,
+               validate_colocation_groups: bool = False):
+    """Add a single attribute to the underlying NodeDef's attr list.
+
+    If you use this method to set the special "_class" attribute,
+    will redirect to a call to the setter for the `colocation_groups`
+    property.
+
+    Args:
+      key: Name of the attribute. Must be unique.
+      value: Value to put in place for the attribute. Can be a Python type or a
+        TensorFlow protocol buffer wrapper class.
+      validate_colocation_groups: If True and this method is setting colocation
+        groups via the special '_class' attribute, raise an exception if the
+        primary node of the colocation group does not exist.
+    """
+    if key == _COLOCATION_ATTR_NAME:
+      # Special magic key name for colocation groups; see docstring for
+      # colocation_groups property.
+      if len(self.colocation_groups) > 0:
+        raise ValueError("Tried to set special '{}' attribute when the "
+                         "Node already has colocation "
+                         "groups".format(_COLOCATION_ATTR_NAME))
+      elif isinstance(value, tf.AttrValue):
+        # Internal TF type; convert to iterable of Python strings
+        if value.list.s is None:
+          raise ValueError("Tried to set special '{}' attribute using "
+                           "tf.AttrValue object, and the object's 'list.s' "
+                           "attribute was not populated. Value: '{}'".format(
+                              _COLOCATION_ATTR_NAME, str(value)))
+        value = [tf.compat.as_str(s_i) for s_i in value.list.s]
+      elif not isinstance(value, list) and not isinstance(value, tuple):
+        raise ValueError("Tried to set special '{}' attribute with a type "
+                         "other than list or tuple. Type is '{}' and value "
+                         "is '{}'".format(_COLOCATION_ATTR_NAME, type(value),
+                                          str(value)))
+      for elem in value:
+        if not elem.startswith(_COLOCATION_PREFIX):
+          raise ValueError("Tried to set special '{}' attribute with "
+                           "something other than a string starting with "
+                           "'{}' (value used: "
+                           "'{}')".format(_COLOCATION_ATTR_NAME,
+                                          _COLOCATION_PREFIX, elem))
+        self.add_colocation_group(elem[len(_COLOCATION_PREFIX):],
+                                  validate=validate_colocation_groups)
+    elif key in self._attr_names():
+      raise ValueError("Already have an attribute called '{}'".format(key))
+    else:
+      self._attributes.append((key, value))
+
+  def clear_attrs(self):
+    """
+    Remove any attributes that are attached to this node.
+    """
+    self._attributes.clear()
+
+  def _attr_names(self):
+    return [a[0] for a in self._attributes]
+
+  def set_control_inputs(self, new_control_inputs: Iterable['Node']):
     """
     Set all control inputs at once, removing anything that was there
     previously.
@@ -398,26 +530,7 @@ class MutableNode(Node):
       self._control_inputs = _decode_control_inputs(new_inputs, self._graph)
     self._graph.increment_version_counter()  # New edges added to graph
 
-  @Node.control_inputs.getter
-  def control_inputs(self) -> Tuple[Node]:
-    return tuple(self._control_inputs)
 
-  def to_node_def(self):
-    ret = tf.NodeDef()
-    ret.name = self.name
-    ret.op = self.op_type
-    for input_tensor in self.inputs:
-      ret.input.append(input_tensor.name)
-    for control_input_node in self.control_inputs:
-      ret.input.append("^" + control_input_node.name)
-    ret.device = self.device
-    for (attr_name, attr_value) in self._attributes:
-      # Funky syntax for setting a field of a union in a protobuf
-      ret.attr[attr_name].CopyFrom(_python_type_to_attr_value(attr_value))
-    return ret
-
-  def set_device(self, device: str):
-    self._device = device
 
 
 ################################################################################
@@ -494,77 +607,4 @@ def _decode_control_inputs(inputs: Iterable[str], g: 'graph.Graph') -> List[
   control_input_names = [n[1:] for n in inputs if n.startswith("^")]
   return [g[name] for name in control_input_names]
 
-
-def _python_type_to_attr_value(value: Any) -> tf.AttrValue:
-  """
-  Convert a Python object or scalar value to a TensorFlow `tf.AttrValue`
-  protocol buffer message.
-
-  Args:
-    value: Python object to be converted
-
-  Returns:
-    An AttrValue object that wraps the contents of `value` in the most
-    appropriate way available.
-  """
-  # TODO(frreiss): Handle AttrValues that are lists
-  if isinstance(value, tf.AttrValue):
-    # TODO(frreiss): Should this case result in an error?
-    return value
-  # Scalar types, in the order they appear in the .proto file
-  elif isinstance(value, str):
-    return tf.AttrValue(s=tf.compat.as_bytes(value))
-  elif isinstance(value, int):
-    return tf.AttrValue(i=value)
-  elif isinstance(value, float):
-    return tf.AttrValue(f=value)
-  elif isinstance(value, bool):
-    return tf.AttrValue(b=value)
-  elif isinstance(value, tf.DType):
-    return tf.AttrValue(type=value.as_datatype_enum)
-  elif isinstance(value, tf.TensorShape):
-    return tf.AttrValue(shape=value.as_proto())
-  elif isinstance(value, np.ndarray):
-    return tf.AttrValue(tensor=tf.make_tensor_proto(values=value))
-  # TODO(frreiss): Populate the "func" and "placeholder" fields of the union
-  #  here
-  else:
-    raise ValueError("Don't know how to convert a {} to "
-                     "tf.AttrValue".format(type(value)))
-
-
-def _attr_value_to_python_type(attr_value: tf.AttrValue) -> Any:
-  """
-  Inverse of _python_type_to_attr_value().
-
-  Args:
-    attr_value: Protocol buffer version of a node's attribute value
-
-  Returns:
-    A Python object or built-in type corresponding to the field in
-    `attr_value` that is in use.
-  """
-  # TODO(frreiss): Handle AttrValues that are lists
-  if attr_value.HasField("s"):          # str
-    # TODO(frreiss): Should we return the binary value here?
-    return tf.compat.as_str(attr_value.s)
-  elif attr_value.HasField("i"):        # int
-    return attr_value.i
-  elif attr_value.HasField("f"):        # float
-    return attr_value.f
-  elif attr_value.HasField("b"):        # bool
-    return attr_value.b
-  elif attr_value.HasField("type"):     # DType
-    return tf.DType(attr_value.type)
-  elif attr_value.HasField("shape"):    # TensorShape
-    # Undocumented behavior of public API: tf.TensorShape constructor accepts
-    # a TensorShapeProto.
-    return tf.TensorShape(attr_value.shape)
-  elif attr_value.HasField("tensor"):   # TensorProto
-    return tf.make_ndarray(attr_value.tensor)
-  # TODO(frreiss): Convert the "func" and "placeholder" fields of the union
-  #  here
-  else:
-    raise ValueError("Don't know how to convert AttrValue {} to "
-                     "a Python object".format(attr_value))
 

@@ -22,6 +22,7 @@ import tensorflow as tf
 from typing import Tuple
 
 from pge import node
+from pge import util
 
 __all__ = [
   "Graph",
@@ -30,19 +31,12 @@ __all__ = [
 
 class Graph(object):
   """
-  Mutable wrapper for tf.GraphDef.
-
-  Stores a reference to the original immutable tf.GraphDef and information about
-  changes made to the graph.
+  Mutable surrogate for a `tf.GraphDef` protocol buffer message
 
   Also stores collection information that would be serialized in MetaGraphDef
 
   Summary of internal data structures:
-  * _immutable_nodes: The original immutable GraphDef protobuf
-  * _deleted_nodes: Tombstones for nodes removed from the original graph,
-                    stored as a set of strings. String == name of removed node
-  * _added_nodes: New nodes added to the graph, stored as a dictionary. Key
-                  is name.
+  * _nodes: Nodes in the graph, stored as a dictionary. Key is name.
   * _version: Counter that increments every time the graph is modified
   * _collections: Map from collection name to collection contents for all
                   collections
@@ -66,16 +60,46 @@ class Graph(object):
     else:
       raise TypeError("Graph is of type {}. Expected a tf.Graph or GraphDef "
                       "proto".format(type(graph)))
+    self._version = 0  # Must happen first; other init code needs self._version
+    self._frozen = False
     self._graph_def = graph_def
     self._next_id = 1
     output_map = _decode_graph(graph_def)
-    self._immutable_nodes = [node.ImmutableNode(self, self._get_next_id(),n,
-                                                output_map[n.name])
-                             for n in graph_def.node]
-    self._deleted_nodes = set()
-    self._added_nodes = {}
-    self._version = 0
+    self._nodes = {}
+
+    # Load nodes in three passes because the graph may contain cycles.
+    for node_def in graph_def.node:
+      self.add_node_from_node_def(node_def, set_inputs=False)
+    for node_def in graph_def.node:
+        self[node_def.name].set_outputs_from_pairs(output_map[node_def.name])
+    for node_def in graph_def.node:
+      self[node_def.name].set_inputs_from_strings(node_def.input,
+                                                  set_control_inputs=True)
+
     self._collections = {}
+
+  def add_node_from_node_def(self, node_def: tf.NodeDef,
+                             set_inputs: bool = False) -> node.Node:
+    """
+    Unpack a `tf.NodeDef` protobuf into a mutable `Node` object.'
+
+    Does NOT set the outputs of the node.
+
+    Args:
+      g: Graph in which the node will be created
+      node_def: Fully-populated NodeDef proto; all fields, including inputs,
+        will be used.
+      set_inputs: Optional. If True, also populate the data and control inputs of
+        the returned Node. This operation will only work if the targets of those
+        inputs are already present in the graph.
+    """
+    ret = self.add_node(name=node_def.name, op_name=node_def.op)
+    ret.device = node_def.device
+    for key in node_def.attr:
+      ret.add_attr(key, util.attr_value_to_python_type(node_def.attr[key]))
+    if set_inputs:
+      ret.set_inputs_from_strings(node_def.input, set_control_inputs=True)
+    return ret
 
   def __getitem__(self, name: str) -> node.Node:
     """
@@ -88,28 +112,25 @@ class Graph(object):
       raise TypeError("name must be a string; got type {}".format(type(name)))
 
     # Search the diffs first, then go back to the original immutable graph
-    if name in self._added_nodes.keys():
-      return self._added_nodes[name]
-    if name in self._deleted_nodes:
-      raise ValueError("Node '{}' has been deleted from the graph".format(name))
-
-    ixs = [i for i in range(len(self._immutable_nodes))
-           if self._immutable_nodes[i].name == name]
-    if 0 == len(ixs):
-      raise ValueError("No node '{}' found in graph".format(name))
-    elif len(ixs) > 1:
-      raise ValueError("Found {} nodes with name '{}' in graph".format(
-        len(ixs), name))
+    if self.contains_node(name):
+      return self._nodes[name]
     else:
-      return self._immutable_nodes[ixs[0]]
+      raise ValueError("No node '{}' found in graph".format(name))
 
-  def add_node(self, name: str, op: str, uniquify_name: bool = True) -> \
-          node.MutableNode:
+  def contains_node(self, name: str) -> bool:
+    """
+    Returns true if the graph has a node by the indicated name. Exact string
+    match.
+    """
+    return name in self._nodes.keys()
+
+  def add_node(self, name: str, op_name: str, uniquify_name: bool = True) -> \
+          node.Node:
     """
     Add a new, empty node to the graph.
     Args:
       name: Name for the new op
-      op: Name of the type of operation for the node
+      op_name: Name of the type of operation for the node
       uniquify_name: Generate a unique name from this name if the graph
         already has a node with the indicated name.
 
@@ -125,15 +146,14 @@ class Graph(object):
       raise ValueError("Graph already contains a node with name '{}' "
                        "(Note that this check is case-insensitive)."
                        .format(name))
-    ret = node.MutableNode(self, self._get_next_id(), name=name, op_name=op)
-    self._added_nodes[name] = ret
+    ret = node.Node(self, self._get_next_id(), name=name, op_name=op_name)
+    self._nodes[name] = ret
     self.increment_version_counter()
     return ret
 
   def add_node_from_node_def(self, node_def: tf.NodeDef,
                              set_inputs: bool = False,
-                             set_control_inputs: bool = False) -> \
-          node.MutableNode:
+                             set_control_inputs: bool = False) -> node.Node:
     """
     Adds a new node to the graph, populating fields of the node from a
     `tf.NodeDef` protocol buffer.
@@ -157,7 +177,7 @@ class Graph(object):
     if set_inputs:
       ret.set_inputs_from_strings(node_def.input,
                                   set_control_inputs=set_control_inputs)
-    ret.set_device(node_def.device)
+    ret.device = node_def.device
     ret.clear_attrs()
     for key in node_def.attr:
       ret.add_attr(key, node_def.attr[key])
@@ -165,7 +185,7 @@ class Graph(object):
     # Don't need to increment version counter; add_node() already did that.
     return ret
 
-  def _name_in_use(self, name: str):
+  def _name_in_use(self, name: str) -> bool:
     """Check whether a name is in use, using the same collision semantics as
     TensorFlow: Exact lowercase string match.
 
@@ -174,14 +194,7 @@ class Graph(object):
 
     Returns True if the indicated name is currently in use, ignoring case.
     """
-    lower_case_name = name.lower()
-    lower_added_names = [k.lower() for k in self._added_nodes.keys()]
-    lower_immutable_names = [n.name.lower() for n in self._graph_def.node]
-    lower_deleted_names = [d.lower() for d in self._deleted_nodes]
-    return lower_case_name in lower_added_names or (
-      lower_case_name in lower_immutable_names
-      and lower_case_name not in lower_deleted_names
-    )
+    return name.lower() in [k.lower() for k in self._nodes.keys()]
 
   def unique_name(self, name: str):
     """Emulate the behavior of the method by the same name in `tf.Graph`.
@@ -222,9 +235,7 @@ class Graph(object):
       A list of all nodes, both immutable and mutable, present in the graph
       after the edits that this object is buffering.
     """
-    return tuple([n for n in self._immutable_nodes
-                  if n.name not in self._deleted_nodes]
-                 + list(self._added_nodes.values()))
+    return tuple(self._nodes.values())
 
   @property
   def tensors(self):
@@ -244,7 +255,7 @@ class Graph(object):
     """
     ret = tf.GraphDef()
     for op in self.nodes:
-      ret.node.append(op.to_node_def())
+      op.to_node_def(ret.node.add())
     return ret
 
   @property
@@ -254,11 +265,25 @@ class Graph(object):
     """
     return self._version
 
+  @property
+  def frozen(self):
+    """
+    True if the graph is configured to raise an exception on any structural
+    modification.
+    """
+    return self._frozen
+
+  @frozen.setter
+  def frozen(self, value):
+    self._frozen = value
+
   def increment_version_counter(self):
     """
     Mark the structure of this graph as "changed" and invalidate any cached
     information about the edges of the graph.
     """
+    if self.frozen:
+      raise RuntimeError("Detected a change to a frozen graph")
     self._version += 1
 
   def get_collection(self, name: str):

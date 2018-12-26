@@ -20,14 +20,17 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
 import re
+from typing import Any
 
+import numpy as np
+from six import iteritems
 import tensorflow as tf
 
-from pge.graph import Graph
-#from pge import graph
-from pge import tensor
+from pge import graph
 from pge import node
+from pge import tensor
 
 __all__ = [
   "make_list_of_op",
@@ -110,6 +113,64 @@ def is_iterable(obj):
   return True
 
 
+def flatten_tree(tree, leaves=None):
+  """Flatten a tree into a list.
+  Args:
+    tree: iterable or not. If iterable, its elements (child) can also be
+      iterable or not.
+    leaves: list to which the tree leaves are appended (None by default).
+  Returns:
+    A list of all the leaves in the tree.
+  """
+  if leaves is None:
+    leaves = []
+  if isinstance(tree, dict):
+    for _, child in iteritems(tree):
+      flatten_tree(child, leaves)
+  elif is_iterable(tree):
+    for child in tree:
+      flatten_tree(child, leaves)
+  else:
+    leaves.append(tree)
+  return leaves
+
+
+def transform_tree(tree, fn, iterable_type=tuple):
+  """Transform all the nodes of a tree.
+  Args:
+    tree: iterable or not. If iterable, its elements (child) can also be
+      iterable or not.
+    fn: function to apply to each leaves.
+    iterable_type: type use to construct the resulting tree for unknown
+      iterable, typically `list` or `tuple`.
+  Returns:
+    A tree whose leaves has been transformed by `fn`.
+    The hierarchy of the output tree mimics the one of the input tree.
+  """
+  if is_iterable(tree):
+    if isinstance(tree, dict):
+      res = tree.__new__(type(tree))
+      res.__init__(
+        (k, transform_tree(child, fn)) for k, child in iteritems(tree))
+      return res
+    elif isinstance(tree, tuple):
+      # NamedTuple?
+      if hasattr(tree, "_asdict"):
+        res = tree.__new__(type(tree), **transform_tree(tree._asdict(), fn))
+      else:
+        res = tree.__new__(type(tree),
+                           (transform_tree(child, fn) for child in tree))
+      return res
+    elif isinstance(tree, collections.Sequence):
+      res = tree.__new__(type(tree))
+      res.__init__(transform_tree(child, fn) for child in tree)
+      return res
+    else:
+      return iterable_type(transform_tree(child, fn) for child in tree)
+  else:
+    return fn(tree)
+
+
 def check_graphs(*args):
   """Check that all the elements in args belong to the same graph.
 
@@ -142,7 +203,7 @@ def get_unique_graph(tops, check_types=None, none_if_empty=False):
     TypeError: if tops is not a iterable of tf.Operation.
     ValueError: if the graph is not unique.
   """
-  if isinstance(tops, Graph):
+  if isinstance(tops, graph.Graph):
     return tops
   if not is_iterable(tops):
     raise TypeError("{} is not iterable".format(type(tops)))
@@ -180,7 +241,7 @@ def make_list_of_op(ops, check_graph=True, allow_graph=True, ignore_ts=False):
      if `check_graph` is `True`, if all the ops do not belong to the
      same graph.
   """
-  if isinstance(ops, Graph):
+  if isinstance(ops, graph.Graph):
     if allow_graph:
       return ops.nodes
     else:
@@ -210,7 +271,7 @@ def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False):
     TypeError: if `ts` cannot be converted to a list of `pge.Tensor` or,
      if `check_graph` is `True`, if all the ops do not belong to the same graph.
   """
-  if isinstance(ts, Graph):
+  if isinstance(ts, graph.Graph):
     if allow_graph:
       return ts.tensors
     else:
@@ -264,7 +325,7 @@ def get_consuming_ops(ts):
 class ControlOutputs(object):
   """The control outputs topology."""
 
-  def __init__(self, g: Graph):
+  def __init__(self, g: 'graph.Graph'):
     """Create a dictionary of control-output dependencies.
 
     Args:
@@ -276,7 +337,7 @@ class ControlOutputs(object):
     Raises:
       TypeError: graph is not a `pge.Graph`.
     """
-    if not isinstance(g, Graph):
+    if not isinstance(g, graph.Graph):
       raise TypeError("Expected a pge.Graph, got: {}".format(type(g)))
     self._control_outputs = {}
     self._graph = g
@@ -373,14 +434,14 @@ def placeholder_name(t=None, scope=None, prefix=_DEFAULT_PLACEHOLDER_PREFIX):
     return "{}{}".format(scope, prefix)
 
 
-def _make_placeholder(graph: Graph,
+def _make_placeholder(g: 'g.Graph',
                       dtype: tf.DType,
                       shape,
                       name: str):
   """Shared code for make_placeholder*() functions.
 
   Args:
-    graph: Surrogate object for the graph into which the placeholder should
+    g: Surrogate object for the graph into which the placeholder should
       be placed.
     name: Name for the op to create
     dtype: Data type for the placeholder
@@ -389,20 +450,20 @@ def _make_placeholder(graph: Graph,
   Returns:
      newly created mutable Node that wraps the placholder op.
   """
-  ret = graph.add_node(name, op="Placeholder")
+  ret = g.add_node(name, op_name="Placeholder")
   ret.add_attr("dtype", dtype)
   ret.add_attr("shape", tf.TensorShape(shape))
   return ret
 
 
-def make_placeholder_from_tensor(graph, t, scope=None,
+def make_placeholder_from_tensor(g: 'graph.Graph', t: tensor.Tensor, scope=None,
                                  prefix=_DEFAULT_PLACEHOLDER_PREFIX):
   """Create a `pge.Node` representing a `tf.placeholder` for the Graph Editor.
 
   Note that the correct graph scope must be set by the calling function.
 
   Args:
-    graph: A `pge.Graph` object in which the placeholder should go.
+    g: A `pge.Graph` object in which the placeholder should go.
     t: a `pge.Tensor` whose name will be used to create the placeholder
     scope: absolute scope within which to create the placeholder. None
       means that the scope of `t` is preserved. `""` means the root scope.
@@ -412,12 +473,12 @@ def make_placeholder_from_tensor(graph, t, scope=None,
   Raises:
     TypeError: if `t` is not `None` or a `tf.Tensor`.
   """
-  return _make_placeholder(graph, dtype=t.dtype, shape=t.shape,
+  return _make_placeholder(g, dtype=t.dtype, shape=t.shape,
                            name=placeholder_name(t, scope=scope,
-                                                  prefix=prefix))
+                                                 prefix=prefix))
 
 
-def make_placeholder_from_dtype_and_shape(graph, dtype, shape=None, scope=None,
+def make_placeholder_from_dtype_and_shape(g, dtype, shape=None, scope=None,
                                           prefix=_DEFAULT_PLACEHOLDER_PREFIX):
   """Create a `pge.Node` representing a `tf.placeholder` for the Graph Editor.
 
@@ -426,7 +487,7 @@ def make_placeholder_from_dtype_and_shape(graph, dtype, shape=None, scope=None,
   tensor argument).
 
   Args:
-    graph: A `pge.Graph` object in which the placeholder should go.
+    g: A `pge.Graph` object in which the placeholder should go.
     dtype: the tensor type.
     shape: the tensor shape (optional).
     scope: absolute scope within which to create the placeholder. None
@@ -435,7 +496,7 @@ def make_placeholder_from_dtype_and_shape(graph, dtype, shape=None, scope=None,
   Returns:
     A newly created tf.placeholder.
   """
-  return _make_placeholder(graph,
+  return _make_placeholder(g,
                            dtype=dtype, shape=shape,
                            name=placeholder_name(scope=scope, prefix=prefix))
 
@@ -478,10 +539,10 @@ def find_corresponding_elem(target, dst_graph, dst_scope="", src_scope=""):
     dst_scope = scope_finalize(dst_scope)
     dst_name = dst_scope + dst_name
 
-  if isinstance(target, tf_ops.Tensor):
+  if isinstance(target, tensor.Tensor):
     return dst_graph.get_tensor_by_name(dst_name)
-  if isinstance(target, tf_ops.Operation):
-    return dst_graph.get_operation_by_name(dst_name)
+  if isinstance(target, node.Node):
+    return dst_graph[dst_name]
   raise TypeError("Expected tf.Tensor or tf.Operation, got: {}", type(target))
 
 
@@ -511,3 +572,116 @@ def find_corresponding(targets, dst_graph, dst_scope="", src_scope=""):
     return find_corresponding_elem(top, dst_graph, dst_scope, src_scope)
   return transform_tree(targets, func)
 
+
+def _python_type_to_attr_list_elem(list_value: tf.AttrValue.ListValue,
+                                   elem: Any):
+  """
+  Subroutine of python_type_to_attr_value(). Converts one element of a Python
+  list to one element of a `tf.AttrValue.ListValue` protobuf.
+
+  Args:
+    list_value: ListValue proto being populated for use within an AttrValue
+      proto. Modified in place.
+    elem: Original value to convert.
+  """
+  if isinstance(elem, str):
+    list_value.s.append(tf.compat.as_bytes(elem))
+  elif isinstance(elem, int):
+    list_value.i.append(elem)
+  elif isinstance(elem, float):
+    list_value.f.append(elem)
+  elif isinstance(elem, bool):
+    list_value.b.append(elem)
+  elif isinstance(elem, tf.DType):
+    list_value.type.append(elem.as_datatype_enum)
+  elif isinstance(elem, tf.TensorShape):
+    list_value.shape.append(elem.as_proto())
+  elif isinstance(elem, np.ndarray):
+    list_value.tensor.append(tf.make_tensor_proto(values=elem))
+  # TODO(frreiss): Populate the "func" field of the union here
+  else:
+    raise ValueError("Don't know how to convert a {} to "
+                     "tf.AttrValue.ListValue".format(type(elem)))
+
+
+def python_type_to_attr_value(value: Any) -> tf.AttrValue:
+  """
+  Convert a Python object or scalar value to a TensorFlow `tf.AttrValue`
+  protocol buffer message.
+
+  Args:
+    value: Python object to be converted
+
+  Returns:
+    An AttrValue object that wraps the contents of `value` in the most
+    appropriate way available.
+  """
+  if isinstance(value, list) or isinstance(value, tuple):
+    if 0 == len(value):
+      return tf.AttrValue(list=tf.AttrValue.ListValue())
+    else:
+      # Nonempty list
+      list_value = tf.AttrValue.ListValue()
+      for elem in value:
+        # TODO(frreiss): Should we disallow heterogeneous types in lists?
+        _python_type_to_attr_list_elem(list_value, elem)
+      return tf.AttrValue(list=list_value)
+  elif isinstance(value, tf.AttrValue):
+    # TODO(frreiss): Should this case result in an error?
+    return value
+  # Scalar types, in the order they appear in the .proto file
+  elif isinstance(value, str):
+    return tf.AttrValue(s=tf.compat.as_bytes(value))
+  elif isinstance(value, int):
+    return tf.AttrValue(i=value)
+  elif isinstance(value, float):
+    return tf.AttrValue(f=value)
+  elif isinstance(value, bool):
+    return tf.AttrValue(b=value)
+  elif isinstance(value, tf.DType):
+    return tf.AttrValue(type=value.as_datatype_enum)
+  elif isinstance(value, tf.TensorShape):
+    return tf.AttrValue(shape=value.as_proto())
+  elif isinstance(value, np.ndarray):
+    return tf.AttrValue(tensor=tf.make_tensor_proto(values=value))
+  # TODO(frreiss): Populate the "func" and "placeholder" fields of the union
+  #  here
+  else:
+    raise ValueError("Don't know how to convert a {} to "
+                     "tf.AttrValue".format(type(value)))
+
+
+def attr_value_to_python_type(attr_value: tf.AttrValue) -> Any:
+  """
+  Inverse of python_type_to_attr_value().
+
+  Args:
+    attr_value: Protocol buffer version of a node's attribute value
+
+  Returns:
+    A Python object or built-in type corresponding to the field in
+    `attr_value` that is in use.
+  """
+  # TODO(frreiss): Handle AttrValues that are lists
+  if attr_value.HasField("s"):          # str
+    # TODO(frreiss): Should we return the binary value here?
+    return tf.compat.as_str(attr_value.s)
+  elif attr_value.HasField("i"):        # int
+    return attr_value.i
+  elif attr_value.HasField("f"):        # float
+    return attr_value.f
+  elif attr_value.HasField("b"):        # bool
+    return attr_value.b
+  elif attr_value.HasField("type"):     # DType
+    return tf.DType(attr_value.type)
+  elif attr_value.HasField("shape"):    # TensorShape
+    # Undocumented behavior of public API: tf.TensorShape constructor accepts
+    # a TensorShapeProto.
+    return tf.TensorShape(attr_value.shape)
+  elif attr_value.HasField("tensor"):   # TensorProto
+    return tf.make_ndarray(attr_value.tensor)
+  # TODO(frreiss): Convert the "func" and "placeholder" fields of the union
+  #  here
+  else:
+    raise ValueError("Don't know how to convert AttrValue {} to "
+                     "a Python object".format(attr_value))

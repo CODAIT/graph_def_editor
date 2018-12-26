@@ -266,6 +266,7 @@ class TransformTest(unittest.TestCase):
     result_tensor = g[result.op.name].output(0)
     max_index_tensor = g[max_index.op.name].output(0)
 
+    g.frozen = True
     copied_graph = pge.Graph()
     _, copy_info = pge.copy(
         g, dst_graph=copied_graph, dst_scope="imported")
@@ -274,11 +275,11 @@ class TransformTest(unittest.TestCase):
 
     tf_copied_graph = tf.Graph()
     with tf_copied_graph.as_default():
-      tf.import_graph_def(copied_graph.to_graph_def())
+      tf.import_graph_def(copied_graph.to_graph_def(), name="")
       with tf.Session() as sess:
         n = 10
-        sum_val = sess.run(copied_result_tensor.name,
-                           feed_dict={copied_max_index_tensor.name: n})
+        sum_val = sess.run(copied_result_tensor.name + ":0",
+                           feed_dict={copied_max_index_tensor.name + ":0": n})
         self.assertEqual(sum_val, 55)
 
   def test_graph_cond(self):
