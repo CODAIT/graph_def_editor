@@ -42,7 +42,13 @@ class Tensor(object):
 
   @property
   def node(self):
-      return self._node
+    return self._node
+
+  @property
+  def op(self):
+    """Alias for self.node, for compatibility with code written for
+    tf.Tensor"""
+    return self.node
 
   @property
   def value_index(self):
@@ -67,7 +73,6 @@ class Tensor(object):
     node that produces this tensor resides."""
     return self._node.graph
 
-  @property
   def consumers(self):
     """Returns the `pge.Node` objects representing the ops that consume the
     tensor that this object represents."""

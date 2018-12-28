@@ -163,6 +163,23 @@ class TransformTest(unittest.TestCase):
       self.assertNear(
           np.linalg.norm(val - np.array([11])), 0.0, ERROR_TOLERANCE)
 
+  def _create_replace_graph(self):
+    """Subroutine of the next few tests. Creates the graph that all these
+    tests use. Since the tests modify the graph, it needs to be recreated
+    each time.
+
+    Returns:
+      (Graph object, c, target tensor to replace, new value, output tensor)"""
+    tmp_graph = tf.Graph()
+    with tmp_graph.as_default():
+      a = tf.constant(1.0, name="a")
+      b = tf.Variable(1.0, name="b")
+      eps = tf.constant(0.001, name="eps")
+      tf.identity(a + b + eps, name="c")
+      tf.constant(2.0, name="a_new")
+    ret = pge.Graph(tmp_graph)
+    return ret, ret["a"].output(0), ret["a_new"].output(0), ret["c"].output(0)
+
   def test_graph_replace(self):
     ops.reset_default_graph()
     a = constant_op.constant(1.0, name="a")
@@ -194,13 +211,8 @@ class TransformTest(unittest.TestCase):
     self.assertNear(c_new_val["c"], 3.001, ERROR_TOLERANCE)
 
   def test_graph_replace_ordered_dict(self):
-    ops.reset_default_graph()
-    a = constant_op.constant(1.0, name="a")
-    b = variables.Variable(1.0, name="b")
-    eps = constant_op.constant(0.001, name="eps")
-    c = array_ops.identity(a + b + eps, name="c")
-    a_new = constant_op.constant(2.0, name="a_new")
-    c_new = ge.graph_replace(collections.OrderedDict({"c": c}), {a: a_new})
+    g, a, a_new, c = self._create_replace_graph()
+    c_new = pge.graph_replace(collections.OrderedDict({"c": c}), {a: a_new})
     self.assertTrue(isinstance(c_new, collections.OrderedDict))
 
   def test_graph_replace_named_tuple(self):

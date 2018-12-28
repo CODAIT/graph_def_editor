@@ -29,6 +29,7 @@ from six import StringIO
 import tensorflow as tf
 from typing import Iterable
 
+from pge import select
 from pge import subgraph
 from pge import util
 from pge.node import Node
@@ -650,10 +651,11 @@ def copy_with_input_replacements(sgv, replacement_ts,
   sgv = subgraph.make_view(sgv)
   if dst_graph is None:
     dst_graph = sgv.graph
-  if not isinstance(dst_graph, tf_ops.Graph):
-    raise TypeError("Expected a tf.Graph, got: {}".format(type(dst_graph)))
+  if not isinstance(dst_graph, Graph):
+    raise TypeError("Expected a pge.Graph, got: {}".format(type(dst_graph)))
 
   copier = Transformer()
+
   # Replace tensor if possible.
   def replace_t_with_replacement_handler(info, t):
     if t in replacement_ts:
@@ -674,29 +676,21 @@ def _add_control_flow_ops(ops, control_ios):
   in a valid graph.
 
   Args:
-    ops: list of ops (modifed in-place).
+    ops: list of ops (modified in-place).
     control_ios: object created by a call to `util.ControlOutputs`.
   """
-  # Find while contexts.
-  control_flow_contexts = set()
+  g = ops[0].graph
+  # Find frame names of while loops containing any of our ops.
+  frame_names = set()
   for op in ops:
-    cfc = op._control_flow_context  # pylint: disable=protected-access
-    if cfc:
-      control_flow_contexts.add(cfc)
-  # Find new ops.
-  new_ops = []
-  for cfc in control_flow_contexts:
-    if cfc.IsWhileContext():
-      new_ops += select.get_walks_intersection_ops(
-          [enter_t.op for enter_t in cfc.loop_enters],
-          [exit_t.op for exit_t in cfc.loop_exits],
-          control_ios=control_ios)
-  # Add new ops.
-  new_ops_set = set(new_ops)
-  ops_set = frozenset(ops)
-  for op in new_ops_set:
-    if op not in ops_set:
-      ops.append(op)
+    frame_names.update(g.node_to_frame_names(op))
+  # Find all ops in those while loops
+  new_ops = set()
+  for frame_name in frame_names:
+    new_ops.update(g.frame_name_to_nodes(frame_name))
+  # Add any ops that weren't in the list before
+  for op in new_ops.difference(ops):
+    ops.append(op)
 
 
 def _flatten_tree(tree, leaves=None):
@@ -764,7 +758,7 @@ def graph_replace(target_ts, replacement_ts, dst_scope="",
   """Create a new graph which compute the targets from the replaced Tensors.
 
   Args:
-    target_ts: a single tf.Tensor or an iterable of tf.Tensor.
+    target_ts: a single pge.Tensor or an iterable of pge.Tensor.
     replacement_ts: dictionary mapping from original tensors to replaced tensors
     dst_scope: the destination scope.
     src_scope: the source scope.
@@ -785,7 +779,7 @@ def graph_replace(target_ts, replacement_ts, dst_scope="",
   # Construct the forward control dependencies edges so that
   # the get_walks_intersection_ops can also traverse the
   # control dependencies.
-  graph = util.get_unique_graph(flatten_target_ts, check_types=(tf_ops.Tensor))
+  graph = util.get_unique_graph(flatten_target_ts, check_types=(Tensor,))
   control_ios = util.ControlOutputs(graph)
   ops = select.get_walks_intersection_ops(list(iterkeys(replacement_ts)),
                                           flatten_target_ts,

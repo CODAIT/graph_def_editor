@@ -316,7 +316,7 @@ def get_consuming_ops(ts):
   ts = make_list_of_t(ts, allow_graph=False)
   ops = []
   for t in ts:
-    for op in t.consumers:
+    for op in t.consumers():
       if op not in ops:
         ops.append(op)
   return ops

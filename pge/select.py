@@ -23,10 +23,9 @@ import re
 
 from six import iteritems
 from six import string_types
-import tensorflow as tf
 
-from pge import graph
-from pge import tensor
+from pge.graph import Graph
+from pge.tensor import Tensor
 from pge import util
 
 __all__ = [
@@ -316,7 +315,7 @@ def compute_boundary_ts(ops):
     # Mark as "inside".
     inside_ts.append(t)
     # Mark as "only inside" if the tensor is not both inside and output.
-    consumers = frozenset(t.consumers)
+    consumers = frozenset(t.consumers())
     if consumers - ops_set:
       continue
     only_inside_ts.append(t)
@@ -416,7 +415,7 @@ def get_forward_walk_ops(seed_ops,
     seed_ops = [seed_ops]
   if not seed_ops:
     return []
-  if isinstance(seed_ops[0], tensor.Tensor):
+  if isinstance(seed_ops[0], Tensor):
     ts = util.make_list_of_t(seed_ops, allow_graph=False)
     seed_ops = util.get_consuming_ops(ts)
   else:
@@ -429,8 +428,8 @@ def get_forward_walk_ops(seed_ops,
     within_ops = frozenset(within_ops)
     seed_ops &= within_ops
 
-  def is_within(op):
-    return (within_ops is None or op in within_ops) and (
+  def is_within(operator):
+    return (within_ops is None or operator in within_ops) and (
         within_ops_fn is None or within_ops_fn(op))
 
   result = list(seed_ops)
@@ -486,7 +485,7 @@ def get_backward_walk_ops(seed_ops,
     seed_ops = [seed_ops]
   if not seed_ops:
     return []
-  if isinstance(seed_ops[0], tf_ops.Tensor):
+  if isinstance(seed_ops[0], Tensor):
     ts = util.make_list_of_t(seed_ops, allow_graph=False)
     seed_ops = util.get_generating_ops(ts)
   else:
@@ -499,8 +498,8 @@ def get_backward_walk_ops(seed_ops,
     within_ops = frozenset(within_ops)
     seed_ops &= within_ops
 
-  def is_within(op):
-    return (within_ops is None or op in within_ops) and (
+  def is_within(operator):
+    return (within_ops is None or operator in within_ops) and (
         within_ops_fn is None or within_ops_fn(op))
 
   result = list(seed_ops)
@@ -670,7 +669,7 @@ def select_ops(*args, **kwargs):
   for k, v in iteritems(kwargs):
     if k == "graph":
       g = v
-      if g is not None and not isinstance(g, graph.Graph):
+      if g is not None and not isinstance(g, Graph):
         raise TypeError("Expected a tf.Graph, got: {}".format(type(g)))
     elif k == "positive_filter":
       positive_filter = v
@@ -730,14 +729,14 @@ def select_ts(*args, **kwargs):
       expression is used without passing a graph as a keyword argument.
   """
   # get keywords arguments
-  graph = None
+  cur_graph = None
   positive_filter = None
   restrict_ts_regex = False
   for k, v in iteritems(kwargs):
     if k == "graph":
-      graph = v
-      if graph is not None and not isinstance(graph, tf_ops.Graph):
-        raise TypeError("Expected a tf.Graph, got {}".format(type(graph)))
+      cur_graph = v
+      if cur_graph is not None and not isinstance(cur_graph, Graph):
+        raise TypeError("Expected a pge.Graph, got {}".format(type(cur_graph)))
     elif k == "positive_filter":
       positive_filter = v
     elif k == "restrict_ts_regex":
@@ -751,14 +750,14 @@ def select_ts(*args, **kwargs):
 
   for arg in args:
     if can_be_regex(arg):
-      if graph is None:
+      if cur_graph is None:
         raise ValueError("Use the keyword argument 'graph' to use regex.")
       regex = make_regex(arg)
       if regex.pattern.startswith("(?#ops)"):
         continue
       if restrict_ts_regex and not regex.pattern.startswith("(?#ts)"):
         continue
-      ts_ = filter_ts_from_regex(graph, regex)
+      ts_ = filter_ts_from_regex(cur_graph, regex)
       for t_ in ts_:
         if t_ not in ts:
           if positive_filter is None or positive_filter(t_):
