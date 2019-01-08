@@ -22,7 +22,7 @@ from __future__ import print_function
 
 import collections
 import re
-from typing import Any
+from typing import Any, Dict
 
 import numpy as np
 from six import iteritems
@@ -41,6 +41,7 @@ __all__ = [
   "placeholder_name",
   "make_placeholder_from_tensor",
   "make_placeholder_from_dtype_and_shape",
+  "load_variables_to_tf_graph",
 ]
 
 
@@ -685,3 +686,22 @@ def attr_value_to_python_type(attr_value: tf.AttrValue) -> Any:
   else:
     raise ValueError("Don't know how to convert AttrValue {} to "
                      "a Python object".format(attr_value))
+
+
+def load_variables_to_tf_graph(g: 'graph.Graph'):
+  """
+  Convenience function to load all variables present in a `pge.Graph` into
+  the current default TensorFlow graph, without generating a MetaGraphDef.
+  Also adds those variables to the appropriate TensorFlow collections.
+
+  Args:
+    g: `pge.Graph` object from which all variables and variable collections
+      should be loaded
+  """
+  for var_name in g.variable_names:
+    var = g.name_to_variable(var_name)
+    tf_var = tf.Variable.from_proto(var.to_proto())
+    print("Adding reconstituted variable '{}' to collections {}".format(
+      var_name, var.collection_names))
+    tf.add_to_collections(var.collection_names, tf_var)
+

@@ -675,6 +675,9 @@ def _add_control_flow_ops(ops, control_ios):
   This function attempts to add missing ops so that the transformation result
   in a valid graph.
 
+  In addition to expanding with the contents of while loops, this function
+  also adds any nodes that the target nodes expect to be collocated with.
+
   Args:
     ops: list of ops (modified in-place).
     control_ios: object created by a call to `util.ControlOutputs`.
@@ -688,8 +691,17 @@ def _add_control_flow_ops(ops, control_ios):
   new_ops = set()
   for frame_name in frame_names:
     new_ops.update(g.frame_name_to_nodes(frame_name))
+  # Add in any nodes that the target nodes expect to be collocated with.
+  num_before = -1  # Always execute while loop below at least once.
+  # Colocation groups may overlap. Repeat until we reach a fixed point.
+  all_ops = new_ops.union(set(ops))
+  while num_before != len(all_ops):
+    num_before = len(all_ops)
+    for group in g.colocation_groups.values():
+      if len(all_ops.intersection(group)) > 0:
+        all_ops.update(group)
   # Add any ops that weren't in the list before
-  for op in new_ops.difference(ops):
+  for op in all_ops.difference(ops):
     ops.append(op)
 
 
@@ -755,7 +767,7 @@ def _flatten_tree(tree, leaves=None):
 
 def graph_replace(target_ts, replacement_ts, dst_scope="",
                   src_scope="", reuse_dst_scope=False):
-  """Create a new graph which compute the targets from the replaced Tensors.
+  """Create a new graph which computes the targets from the replaced Tensors.
 
   Args:
     target_ts: a single pge.Tensor or an iterable of pge.Tensor.
@@ -766,7 +778,7 @@ def graph_replace(target_ts, replacement_ts, dst_scope="",
       Otherwise, the scope is given a unique name based on the one given
       by appending an underscore followed by a digit (default).
   Returns:
-    A single tf.Tensor or a list of target tf.Tensor, depending on
+    A single pge.Tensor or a list of target pge.Tensor, depending on
     the type of the input argument `target_ts`.
     The returned tensors are recomputed using the tensors from replacement_ts.
   Raises:
@@ -794,7 +806,9 @@ def graph_replace(target_ts, replacement_ts, dst_scope="",
   # Create a copy of the relevant subgraph
   unused_sgv_, info = copy_with_input_replacements(
       ops, replacement_ts, None, dst_scope, src_scope, reuse_dst_scope)
+
   # Return the transformed targets but keep the original if the transformed
   # counterpart cannot be found
-  missing_fn = lambda original_t: original_t
+  def missing_fn(original_t):
+    return original_t
   return info.transformed(target_ts, missing_fn)

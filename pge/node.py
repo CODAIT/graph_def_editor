@@ -70,6 +70,9 @@ class Node(object):
     self._control_inputs = []
     self._colocation_groups = []
 
+  def __repr__(self):
+    return "Node[{}]".format(self.name)
+
   @property
   def name(self) -> str:
     """
@@ -291,8 +294,9 @@ class Node(object):
         raise ValueError("Graph does not contain a node with name '{}'".format(
           s))
     self._colocation_groups = value
-    # TODO(frreiss): Invalidate any cached information that the parent Graph
-    #  may have generated about colocation constraints.
+    # Invalidate any cached information that the parent Graph may have
+    # generated about colocation constraints.
+    self.graph.increment_version_counter()
 
   def add_colocation_group(self, head_node_name: str, validate: bool = True):
     """

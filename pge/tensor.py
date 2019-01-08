@@ -40,6 +40,13 @@ class Tensor(object):
     self._dtype = dtype
     self._shape = shape
 
+  def __str__(self):
+    return "Tensor '{}' (dtype {}, shape {})".format(self.name, self.dtype,
+                                                     self.shape)
+
+  def __repr__(self):
+    return str(self)
+
   @property
   def node(self):
     return self._node
@@ -91,10 +98,6 @@ class Tensor(object):
     Emulates the behavior of `tf.Tensor.name`
 
     Returns:
-      A TensorFlow-like tensor name string in the form "<op>" (output 0) or
-      "<op>:<output index>" (other outputs)
+      A TensorFlow-like tensor name string in the form "<op>:<output index>"
     """
-    if 0 == self.value_index:
-      return self.node.name
-    else:
-      return "{}:{}".format(self.node.name, self.value_index)
+    return "{}:{}".format(self.node.name, self.value_index)

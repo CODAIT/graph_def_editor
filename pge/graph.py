@@ -19,10 +19,11 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
-from typing import Tuple, Dict
+from typing import Tuple, Dict, FrozenSet, Iterable
 
 from pge import node
 from pge import util
+from pge import variable
 
 __all__ = [
   "Graph",
@@ -46,24 +47,31 @@ class Graph(object):
                   collections
   """
 
-  def __init__(self, graph: tf.GraphDef = None):
+  def __init__(self, g: tf.GraphDef = None, collections:
+               Iterable[tf.MetaGraphDef.CollectionDefEntry] = None):
     """
     Wrap a tf.GraphDef protocol buffer in a Graph object.
 
     Args:
-      graph: a tf.Graph or tf.GraphDef protobuf that represents a
+      g: a tf.Graph or tf.GraphDef protobuf that represents a
         TensorFlow graph. If set to None, generate an empty
         tf.GraphDef
+      collections: Optional iterable of tf.MetaGraphDef.CollectionDefEntry 
+        objects containing information about collections in the graph.
+        Note that this constructor will pull collection info out of `g` if
+        it is a `tf.Graph` and `collections` is `None`.
     """
-    if graph is None:
+    if g is None:
       graph_def = tf.GraphDef()
-    elif isinstance(graph, tf.GraphDef):
-      graph_def = graph
-    elif isinstance(graph, tf.Graph):
-      graph_def = graph.as_graph_def()
+    elif isinstance(g, tf.GraphDef):
+      graph_def = g
+    elif isinstance(g, tf.Graph):
+      graph_def = g.as_graph_def()
+      if collections is None:
+        collections = _make_collection_defs(g)
     else:
       raise TypeError("Graph is of type {}. Expected a tf.Graph or GraphDef "
-                      "proto".format(type(graph)))
+                      "proto".format(type(g)))
     self._version = 0  # Must happen first; other init code needs self._version
     self._frozen = False
     self._graph_def = graph_def
@@ -72,8 +80,10 @@ class Graph(object):
     self._node_name_to_node = {}  # Dict[str, node.Node]; key is node name
     self._node_to_frame_names = None
     self._frame_name_to_nodes = None
+    self._head_name_to_coloc_group = None  # Dict[str, FrozenList[str]]
+    self._variable_name_to_variable = {}  # Dict[str, Variable]
 
-    # Load nodes in three passes because the graph may contain cycles.
+    # Load nodes in three passes because the g may contain cycles.
     for node_def in graph_def.node:
       self.add_node_from_node_def(node_def, set_inputs=False)
     for node_def in graph_def.node:
@@ -83,6 +93,9 @@ class Graph(object):
                                                   set_control_inputs=True)
 
     self._collections = {}
+    if collections is not None:
+      for c in collections:
+        self.add_collection_from_collection_def(c)
 
   def add_node_from_node_def(self, node_def: tf.NodeDef,
                              set_inputs: bool = False) -> node.Node:
@@ -106,6 +119,22 @@ class Graph(object):
     if set_inputs:
       ret.set_inputs_from_strings(node_def.input, set_control_inputs=True)
     return ret
+
+  def add_collection_from_collection_def(self, collection_def:
+                                         tf.MetaGraphDef.CollectionDefEntry):
+    """
+    Unpack a `tf.MetaGraphDef.CollectionDefEntry` of serialized variables 
+    into a collection of variables in this graph. The collection must not exist. 
+    Variables that do not already exist will be created.
+    """
+    collection_name = collection_def.key
+    print("Adding collection '{}' to pge.Graph".format(collection_name))
+    for serialized_var in collection_def.value.bytes_list.value:
+      print("Serialized var: {} of type {}".format(serialized_var,
+                                                   type(serialized_var)))
+      var = self.add_variable_from_variable_def(serialized_var,
+                                                skip_if_present=True)
+      var.add_to_collection(collection_name)
 
   def __getitem__(self, name: str) -> node.Node:
     """
@@ -191,6 +220,58 @@ class Graph(object):
     # Don't need to increment version counter; add_node() already did that.
     return ret
 
+  def add_variable(self, name: str):
+    """
+    Adds a new variable to the graph.
+
+    Args:
+      name: Name of the variable. Must not already be in use.
+
+    Returns the `pge.Variable` object corresponding to the added variable.
+    """
+    if name in self._variable_name_to_variable:
+      raise ValueError("Variable name '{}' already in use".format(name))
+    v = variable.Variable(self)
+    v.name = name
+    self._variable_name_to_variable[name] = v
+    return v
+
+  def add_variable_from_variable_def(self, variable_def,
+                                     skip_if_present: bool = False):
+    """
+    Adds a new variable to the graph and populates the fields of the
+    corresponding Variable object according to a protocol buffer message.
+
+    Args:
+      variable_def: `tensorflow.core.framework.variable_pb2.VariableDef`
+        protobuf object. May be serialized as a `bytes` object.
+      skip_if_present: If True, silently skips inserting duplicate variables,
+        as long as they don't conflict with existing variables.
+
+    Returns the `pge.Variable` object corresponding to the added variable.
+    """
+    v = variable.Variable(self)
+    v.from_proto(variable_def, allow_duplicates=skip_if_present)
+    if v.name not in self._variable_name_to_variable:
+      self._variable_name_to_variable[v.name] = v
+    return self._variable_name_to_variable[v.name]
+
+  @property
+  def variable_names(self):
+    return self._variable_name_to_variable.keys()
+
+  def name_to_variable(self, name: str) -> variable.Variable:
+    """
+    Fetch a variable by its variable name.
+
+    Args:
+      name: Name of a variable in this graph.
+
+    Returns the variable associated with the name. Raises an exception if
+    there is no variable with the indicated name.
+    """
+    return self._variable_name_to_variable[name]
+
   def _name_in_use(self, name: str) -> bool:
     """Check whether a name is in use, using the same collision semantics as
     TensorFlow: Exact lowercase string match.
@@ -235,6 +316,10 @@ class Graph(object):
     return new_name
 
   @property
+  def node_names(self) -> Iterable[node.Node]:
+    return self._node_name_to_node.keys()
+
+  @property
   def nodes(self) -> Tuple[node.Node]:
     """
     Returns:
@@ -253,6 +338,46 @@ class Graph(object):
     for op in self.nodes:
       ts += op.outputs
     return ts
+
+  def get_tensor_by_name(self, tensor_name: str, error_msg: str = None):
+    """
+    Retrieve a tensor by human-readable name.
+
+    Args:
+      tensor_name: TensorFlow-format name ('node name:input num')
+      error_msg: Optional format string for raising errors. Must be able to
+        serve as an input to `str.format()` with two arguments: tensor name
+        string and reason for failure.
+
+    Returns: pge.Tensor object corresponding to the indicated tensor.
+
+    Raises ValueError if the name is invalid or references a tensor that does
+    not exist.
+    """
+    if error_msg is None:
+      error_msg = "Invalid tensor name '{}': {}"
+
+    if ":" in tensor_name:
+      node_name, output_ix_str = tensor_name.split(":")
+      if not output_ix_str.isdigit():
+        raise ValueError(error_msg.format(
+          tensor_name, "Invalid output index string '{}'.".format(output_ix_str)
+        ))
+      output_ix = int(output_ix_str)
+    else:
+      node_name = tensor_name
+      output_ix = 0
+    if node_name not in self._node_name_to_node:
+      raise ValueError(error_msg.format(
+        tensor_name, "Node name '{}' not found in graph.".format(node_name)
+      ))
+    n = self[node_name]
+    if output_ix >= len(n.outputs):
+      raise ValueError(error_msg.format(
+        tensor_name, "Requested output {}, but node '{}' has {} "
+                     "outputs.".format(output_ix, node_name, len(n.outputs))
+      ))
+    return n.output(int(output_ix_str))
 
   def to_graph_def(self):
     """
@@ -293,6 +418,7 @@ class Graph(object):
     self._version += 1
     self._node_to_frame_names = None
     self._frame_name_to_nodes = None
+    self._head_name_to_coloc_group = None
 
   def get_collection(self, name: str):
     """Fetch the contents of a collection, similarly to the method in
@@ -455,6 +581,28 @@ class Graph(object):
       k: tuple(v) for k, v in new_frame_name_to_nodes.items()
     }
 
+  @property
+  def colocation_groups(self) -> Dict[str, FrozenSet[node.Node]]:
+    """
+    Generate a table of all groups of nodes that must be on the same device
+    according to colocation constrains in the underlying NodeDefs.
+
+    Returns:
+      A dictionary with one entry per group. Key is the name of the
+      "master" node in the group; value is a set of nodes.
+      The returned value will become invalid if colocation group info or
+      graph topology is updated.
+    """
+    if self._head_name_to_coloc_group is None:
+      # Cached table has been invalidated. Regenerate it.
+      head_name_to_coloc_group = {}  # Dict[str, Set[str]]
+      for n in self.nodes:
+        for head_name in n.colocation_groups:
+          head_name_to_coloc_group.setdefault(head_name, set()).add(n)
+      self._head_name_to_coloc_group = {
+        k: frozenset(v) for k, v in head_name_to_coloc_group.items() }
+    return self._head_name_to_coloc_group
+
 
 ################################################################################
 # Stuff below this line is private to this file.
@@ -490,4 +638,48 @@ def _decode_graph(graph_def):
   output_map = {op.name: [(t.dtype, t.shape) for t in op.outputs]
                 for op in temp_graph.get_operations()}
   return output_map
+
+
+def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
+  tf.MetaGraphDef.CollectionDefEntry]:
+  """
+  Convenience function to serialize all the collections in a TensorFlow graph.
+
+  **NOTE:** Currently this function only captures collections of variables.
+
+  Args:
+    tf_g: TensorFlow graph from which to harvest collections
+
+  Returns a list of `tf.MetaGraphDef.CollectionDefEntry` protobuf containing
+  the serialized
+  contents of the collections.
+  """
+  ret = []
+  for collection_name in tf_g.collections:
+    if type(collection_name) is not str:
+      print("Skipping non-string collection name {}".format(collection_name))
+      continue
+    collection_items = tf_g.get_collection(collection_name)
+    collection_proto = tf.MetaGraphDef.CollectionDefEntry()
+    collection_proto.key = collection_name
+    for item in collection_items:
+      if isinstance(item, tf.Variable):
+        # Ask TensorFlow to generate the protobuf version of this variable
+        var_proto = item.to_proto()
+
+        # TensorFlow stores variables as binary serialized objects for some
+        # reason.
+        collection_proto.value.bytes_list.value.append(
+          var_proto.SerializeToString())
+      elif type(item).__name__ == "WhileContext":
+        print("Skipping collection {} -- is WhileContext.".format(
+          collection_name))
+      else:
+        raise NotImplementedError("Can't serialize item '{}' in collection "
+                                  "'{}' because it is a "
+                                  "'{}'.".format(item, collection_name,
+                                                 type(item).__name__))
+
+    ret.append(collection_proto)
+  return ret
 

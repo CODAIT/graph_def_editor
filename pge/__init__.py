@@ -32,6 +32,7 @@ from pge.select import *
 from pge.subgraph import *
 from pge.transform import *
 from pge.util import *
+from pge.variable import *
 # pylint: enable=wildcard-import
 
 # some useful aliases

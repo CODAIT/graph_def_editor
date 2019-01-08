@@ -33,6 +33,24 @@ ERROR_TOLERANCE = 1e-3
 
 class TransformTest(unittest.TestCase):
 
+  # Slightly modified version of the method by the same name in tf.TestCase
+  def assertNear(self, f1, f2, err, msg=None):
+    """Asserts that two floats are near each other.
+    Checks that |f1 - f2| < err and asserts a test failure
+    if not.
+    Args:
+      f1: A float value.
+      f2: A float value.
+      err: A float value.
+      msg: An optional string message to append to the failure message.
+    """
+    # f1 == f2 is needed here as we might have: f1, f2 = inf, inf
+    self.assertTrue(
+      f1 == f2 or abs(f1 - f2) <= err,
+      "{:f} != {:f} +/- {:f}{}".format(f1, f2, err,
+                                       " ({})".format(msg if msg is not None
+                                                      else "")))
+
   def setUp(self):
     tf_graph = tf.Graph()
     with tf_graph.as_default():
@@ -103,9 +121,6 @@ class TransformTest(unittest.TestCase):
       add_noise_op = info.graph_.add_node("AddNoise", "Add")
       add_noise_op.add_attr("T", tf.float32)
       add_noise_op.set_inputs([noise_op.outputs[0], op_.outputs[0]])
-      #import textwrap
-      #print("add_noise_op.to_node_def() returns:\n{}".format(
-      #  textwrap.indent(str(add_noise_op.to_node_def()), "  ")))
       add_noise_op.infer_outputs()
       t_ = add_noise_op.outputs[0]
 
@@ -116,8 +131,6 @@ class TransformTest(unittest.TestCase):
 
     graph = pge.Graph()
     transformer(self.graph, graph, "", "")
-    print("self.graph nodes are: {}".format([n.name for n in self.graph.nodes]))
-    print("Graph nodes are: {}".format([n.name for n in graph.nodes]))
     matcher0 = pge.OpMatcher("AddNoise").input_ops(
         "Noise", pge.OpMatcher("Add").input_ops("Const", "Input"))
     matcher1 = pge.OpMatcher("AddNoise_1").input_ops(
@@ -163,7 +176,8 @@ class TransformTest(unittest.TestCase):
       self.assertNear(
           np.linalg.norm(val - np.array([11])), 0.0, ERROR_TOLERANCE)
 
-  def _create_replace_graph(self):
+  @staticmethod
+  def _create_replace_graph():
     """Subroutine of the next few tests. Creates the graph that all these
     tests use. Since the tests modify the graph, it needs to be recreated
     each time.
@@ -216,51 +230,50 @@ class TransformTest(unittest.TestCase):
     self.assertTrue(isinstance(c_new, collections.OrderedDict))
 
   def test_graph_replace_named_tuple(self):
-    ops.reset_default_graph()
-    a = constant_op.constant(1.0, name="a")
-    b = variables.Variable(1.0, name="b")
-    eps = constant_op.constant(0.001, name="eps")
-    c = array_ops.identity(a + b + eps, name="c")
-    a_new = constant_op.constant(2.0, name="a_new")
+    g, a, a_new, c = self._create_replace_graph()
     one_tensor = collections.namedtuple("OneTensor", ["t"])
-    c_new = ge.graph_replace(one_tensor(c), {a: a_new})
+    c_new = pge.graph_replace(one_tensor(c), {a: a_new})
     self.assertTrue(isinstance(c_new, one_tensor))
 
   def test_graph_replace_missing(self):
-    ops.reset_default_graph()
-    a = constant_op.constant(1.0, name="a")
-    b = constant_op.constant(2.0, name="b")
-    c = a + 2 * b
-    d = constant_op.constant(2.0, name="d")
-    res = ge.graph_replace([b, c], {a: d})
+    tmp_graph = tf.Graph()
+    with tmp_graph.as_default():
+      a_tensor = tf.constant(1.0, name="a")
+      b_tensor = tf.constant(2.0, name="b")
+      _ = tf.add(a_tensor, 2 * b_tensor, name="c")
+      _ = tf.constant(2.0, name="d")
+    g = pge.Graph(tmp_graph)
+    res = pge.graph_replace([g["b"].output(0), g["c"].output(0)],
+                            {g["a"].output(0): g["d"].output(0)})
     self.assertEqual(res[0].name, "b:0")
-    self.assertEqual(res[1].name, "add_1:0")
+    self.assertEqual(res[1].name, "c_1:0")
 
   def test_graph_replace_gradients(self):
-    ops.reset_default_graph()
-    w = variables.VariableV1(0.0, name="w")
-    y = math_ops.multiply(math_ops.multiply(w, w, name="mul1"), w, name="mul2")
-    g = gradients_impl.gradients(y, w, name="grad")[0]
+    tmp_graph = tf.Graph()
+    with tmp_graph.as_default():
+      w_tensor = tf.Variable(0.0, name="w")
+      y_tensor = tf.multiply(tf.multiply(w_tensor, w_tensor, name="mul1"),
+                             w_tensor, name="mul2")
+      grad_tensor = tf.gradients(y_tensor, w_tensor, name="gradient")[0]
+      _ = tf.identity(grad_tensor, "grad")
+
+    g = pge.Graph(tmp_graph)
 
     # Extract the operations.
-    replacement_ts = {w.value(): g}
-    original_mul1_grad = (ops.get_default_graph().
-                          get_operation_by_name("grad/mul1_grad/Mul_1"))
+    replacement_ts = {g["w/read"].output(0): g["grad"].output(0)}
 
     # Should not raise exception.
-    res = ge.graph_replace(g, replacement_ts, dst_scope="res")
+    res = pge.graph_replace(g["grad"].output(0), replacement_ts,
+                            dst_scope="res")
 
-    # Extract the operations after graph_replace.
-    result_mul1_grad = (ops.get_default_graph().
-                        get_operation_by_name("res/grad/mul1_grad/Mul_1"))
-
-    # Make sure _original_ops are as expected.
-    self.assertEqual(original_mul1_grad._original_op.name, u"mul1")
-    self.assertEqual(result_mul1_grad._original_op.name, u"res/mul1")
-    self.assertNotEqual(res.name, g.name)
-    with session.Session() as sess:
-      sess.run(variables.global_variables_initializer())
-      g_val, res_val = sess.run([g, res])
+    self.assertNotEqual(res.name, g["grad"].output(0).name)
+    after_graph = tf.Graph()
+    with after_graph.as_default():
+      tf.import_graph_def(g.to_graph_def(), name="")
+      pge.util.load_variables_to_tf_graph(g)
+      with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        g_val, res_val = sess.run([g["grad"].output(0).name, res.name])
     self.assertNear(g_val, 0.0, ERROR_TOLERANCE)
     self.assertNear(res_val, 0.0, ERROR_TOLERANCE)
 
@@ -290,8 +303,8 @@ class TransformTest(unittest.TestCase):
       tf.import_graph_def(copied_graph.to_graph_def(), name="")
       with tf.Session() as sess:
         n = 10
-        sum_val = sess.run(copied_result_tensor.name + ":0",
-                           feed_dict={copied_max_index_tensor.name + ":0": n})
+        sum_val = sess.run(copied_result_tensor.name,
+                           feed_dict={copied_max_index_tensor.name: n})
         self.assertEqual(sum_val, 55)
 
   def test_graph_cond(self):
@@ -314,6 +327,5 @@ class TransformTest(unittest.TestCase):
         res = sess.run(copied_result, feed_dict={copied_choice: False})
         self.assertEqual(res, 2)
 
-
 if __name__ == "__main__":
-  test.main()
+  unittest.main()
