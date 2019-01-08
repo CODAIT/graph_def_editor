@@ -3,6 +3,6 @@
 env
 *.swp
 */__pycache__
-pge.iml
+graph_def_editor.iml
 test.out
 

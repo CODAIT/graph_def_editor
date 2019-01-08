@@ -64,20 +64,20 @@ class TransformTest(unittest.TestCase):
     self.o = self.graph["o"]
 
   def test_copy(self):
-    graph = ops.Graph()
-    _, info = ge.copy(self.graph, graph)
+    graph = gde.Graph()
+    _, info = gde.copy(self.graph, graph)
     self.assertEqual(
-        set(op.name for op in self.graph.get_operations()),
-        set(op.name for op in graph.get_operations()))
-    src_ops = self.graph.get_operations()
-    dst_ops = graph.get_operations()
+        set(op.name for op in self.graph.nodes),
+        set(op.name for op in graph.nodes))
+    src_ops = self.graph.nodes
+    dst_ops = graph.nodes
     for op in src_ops:
       op_ = info.transformed(op)
       self.assertTrue(op_ in dst_ops)
       self.assertEqual(op.name, op_.name)
       self.assertEqual(info.original(op_), op)
-    src_ts = ge.util.get_tensors(self.graph)
-    dst_ts = ge.util.get_tensors(graph)
+    src_ts = self.graph.tensors
+    dst_ts = graph.tensors
     for t in src_ts:
       t_ = info.transformed(t)
       self.assertTrue(t_ in dst_ts)
@@ -85,15 +85,20 @@ class TransformTest(unittest.TestCase):
       self.assertEqual(info.original(t_), t)
 
   def test_copy_assert(self):
-    ops.reset_default_graph()
-    a = constant_op.constant(1)
-    b = constant_op.constant(1)
-    eq = math_ops.equal(a, b)
-    assert_op = control_flow_ops.Assert(eq, [a, b])
-    with ops.control_dependencies([assert_op]):
-      _ = math_ops.add(a, b)
-    sgv = ge.make_view([assert_op, eq.op, a.op, b.op])
-    copier = ge.Transformer()
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      a = tf.constant(1, name="a")
+      b = tf.constant(1, name="b")
+      eq = tf.equal(a, b, name="EQ")
+      assert_tf_op = tf.Assert(eq, [a, b])
+      with tf.control_dependencies([assert_tf_op]):
+        _ = tf.add(a, b)
+    assert_op_name = assert_tf_op.name
+
+    g = gde.Graph(tf_g)
+    assert_op = g[assert_op_name]
+    sgv = gde.make_view([assert_op, g["EQ"], g["a"], g["b"]])
+    copier = gde.Transformer()
     _, info = copier(sgv, sgv.graph, "", "")
     new_assert_op = info.transformed(assert_op)
     self.assertIsNotNone(new_assert_op)
