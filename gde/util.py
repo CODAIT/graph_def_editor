@@ -701,7 +701,5 @@ def load_variables_to_tf_graph(g: 'graph.Graph'):
   for var_name in g.variable_names:
     var = g.name_to_variable(var_name)
     tf_var = tf.Variable.from_proto(var.to_proto())
-    print("Adding reconstituted variable '{}' to collections {}".format(
-      var_name, var.collection_names))
     tf.add_to_collections(var.collection_names, tf_var)
 

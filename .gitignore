@@ -4,4 +4,5 @@ env
 *.swp
 */__pycache__
 pge.iml
+test.out
 

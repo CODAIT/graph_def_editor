@@ -114,11 +114,11 @@ class TransformTest(unittest.TestCase):
       #       constant_op.constant(1.0, shape=[10], name="Noise"),
       #       op_.outputs[0],
       #       name="AddNoise")
-      noise_op = info.graph_.add_node("Noise", "Const")
+      noise_op = info.graph_.add_node("Noise", "Const", uniquify_name=True)
       noise_op.add_attr("dtype", tf.float32)
       noise_op.add_attr("value", np.repeat(1., 10))
       noise_op.infer_outputs()
-      add_noise_op = info.graph_.add_node("AddNoise", "Add")
+      add_noise_op = info.graph_.add_node("AddNoise", "Add", uniquify_name=True)
       add_noise_op.add_attr("T", tf.float32)
       add_noise_op.set_inputs([noise_op.outputs[0], op_.outputs[0]])
       add_noise_op.infer_outputs()
@@ -167,14 +167,33 @@ class TransformTest(unittest.TestCase):
       self.assertEqual(op.get_attr("_bar"), "bar")
 
   def test_copy_with_input_replacements(self):
-    with self.graph.as_default():
-      ten = constant_op.constant(10.0, shape=[10], name="Input")
-      sgv, _ = ge.copy_with_input_replacements(self.o.op,
-                                               {self.o.op.inputs[1]: ten})
-      with session.Session() as sess:
-        val = sess.run(sgv.outputs[0])
-      self.assertNear(
-          np.linalg.norm(val - np.array([11])), 0.0, ERROR_TOLERANCE)
+
+    # Original code:
+    # with self.graph.as_default():
+    #   _ = tf.constant(10.0, shape=[10], name="Input")
+    # New code adds node as a NodeDef
+    ten_node = self.graph.add_node("Ten", "Const", uniquify_name=False)
+    ten_node.set_outputs_from_pairs([(tf.float32, [10])])
+    ten_node.add_attr("dtype", tf.float32)
+    ten_node.add_attr("value", np.full([10], 10.0, dtype=np.float32))
+
+    ten_tensor = ten_node.output(0)
+    sgv, _ = gde.copy_with_input_replacements(
+      # self.o is an identity on top of a tree of add ops
+      [self.o, self.o.inputs[0].node],
+      # Drill down to second input to outer add()
+      {self.o.inputs[0].node.inputs[1]: ten_tensor}
+    )
+
+    after_graph = tf.Graph()
+    with after_graph.as_default():
+      tf.import_graph_def(self.graph.to_graph_def(), name="")
+      with tf.Session() as sess:
+        val = sess.run(sgv.outputs[0].name)
+
+    print("val is {}".format(val))
+    self.assertNear(
+      np.linalg.norm(val - np.array([11])), 0.0, ERROR_TOLERANCE)
 
   @staticmethod
   def _create_replace_graph():
@@ -195,31 +214,34 @@ class TransformTest(unittest.TestCase):
     return ret, ret["a"].output(0), ret["a_new"].output(0), ret["c"].output(0)
 
   def test_graph_replace(self):
-    ops.reset_default_graph()
-    a = constant_op.constant(1.0, name="a")
-    b = variables.Variable(1.0, name="b")
-    eps = constant_op.constant(0.001, name="eps")
-    c = array_ops.identity(a + b + eps, name="c")
-    a_new = constant_op.constant(2.0, name="a_new")
-    c_new = ge.graph_replace(c, {a: a_new})
-    with session.Session() as sess:
-      sess.run(variables.global_variables_initializer())
-      c_val, c_new_val = sess.run([c, c_new])
+    g, a, a_new, c = self._create_replace_graph()
+    c_new = gde.graph_replace(c, {a: a_new})
+
+    after_graph = tf.Graph()
+    with after_graph.as_default():
+      tf.import_graph_def(g.to_graph_def(), name="")
+      gde.util.load_variables_to_tf_graph(g)
+      with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        c_val, c_new_val = sess.run([c.name, c_new.name])
+
     self.assertNear(c_val, 2.001, ERROR_TOLERANCE)
     self.assertNear(c_new_val, 3.001, ERROR_TOLERANCE)
 
   def test_graph_replace_dict(self):
-    ops.reset_default_graph()
-    a = constant_op.constant(1.0, name="a")
-    b = variables.Variable(1.0, name="b")
-    eps = constant_op.constant(0.001, name="eps")
-    c = array_ops.identity(a + b + eps, name="c")
-    a_new = constant_op.constant(2.0, name="a_new")
-    c_new = ge.graph_replace({"c": c}, {a: a_new})
+    g, a, a_new, c = self._create_replace_graph()
+    c_new = gde.graph_replace({"c": c}, {a: a_new})
     self.assertTrue(isinstance(c_new, dict))
-    with session.Session() as sess:
-      sess.run(variables.global_variables_initializer())
-      c_val, c_new_val = sess.run([c, c_new])
+
+    after_graph = tf.Graph()
+    with after_graph.as_default():
+      tf.import_graph_def(g.to_graph_def(), name="")
+      gde.util.load_variables_to_tf_graph(g)
+      with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        c_val, c_new_val = sess.run([c.name,
+                                     {k: v.name for k, v in c_new.items()}])
+
     self.assertTrue(isinstance(c_new_val, dict))
     self.assertNear(c_val, 2.001, ERROR_TOLERANCE)
     self.assertNear(c_new_val["c"], 3.001, ERROR_TOLERANCE)
@@ -308,24 +330,38 @@ class TransformTest(unittest.TestCase):
         self.assertEqual(sum_val, 55)
 
   def test_graph_cond(self):
-    graph = ops.Graph()
-    with graph.as_default():
-      choice = array_ops.placeholder(shape=(), dtype=dtypes.bool)
-      result = control_flow_ops.cond(
-          choice,
-          lambda: constant_op.constant(1),
-          lambda: constant_op.constant(2))
-    copied_graph = ops.Graph()
-    _, copy_info = ge.copy(
-        graph, dst_graph=copied_graph, dst_scope="imported")
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      choice_tensor = tf.placeholder(shape=(), dtype=tf.bool, name="choice")
+      _ = tf.identity(
+        tf.cond(
+          choice_tensor,
+          lambda: tf.constant(1),
+          lambda: tf.constant(2)
+        ),
+        name="result"
+      )
+
+    g = gde.Graph(tf_g)
+    choice = g["choice"].output(0)
+    result = g["result"].output(0)
+
+    copied_g = gde.Graph()
+    _, copy_info = gde.copy(
+        g, dst_graph=copied_g, dst_scope="imported")
     copied_result = copy_info.transformed(result)
     copied_choice = copy_info.transformed(choice)
-    with copied_graph.as_default():
-      with session.Session() as sess:
-        res = sess.run(copied_result, feed_dict={copied_choice: True})
+
+    tf_copied_graph = tf.Graph()
+    with tf_copied_graph.as_default():
+      tf.import_graph_def(copied_g.to_graph_def(), name="")
+      with tf.Session() as sess:
+        res = sess.run(copied_result.name, feed_dict={copied_choice.name: True})
         self.assertEqual(res, 1)
-        res = sess.run(copied_result, feed_dict={copied_choice: False})
+        res = sess.run(copied_result.name,
+                       feed_dict={copied_choice.name: False})
         self.assertEqual(res, 2)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -128,10 +128,7 @@ class Graph(object):
     Variables that do not already exist will be created.
     """
     collection_name = collection_def.key
-    print("Adding collection '{}' to gde.Graph".format(collection_name))
     for serialized_var in collection_def.value.bytes_list.value:
-      print("Serialized var: {} of type {}".format(serialized_var,
-                                                   type(serialized_var)))
       var = self.add_variable_from_variable_def(serialized_var,
                                                 skip_if_present=True)
       var.add_to_collection(collection_name)
@@ -159,7 +156,7 @@ class Graph(object):
     """
     return name in self._node_name_to_node.keys()
 
-  def add_node(self, name: str, op_name: str, uniquify_name: bool = True) -> \
+  def add_node(self, name: str, op_name: str, uniquify_name: bool = False) -> \
           node.Node:
     """
     Add a new, empty node to the graph.
@@ -167,7 +164,8 @@ class Graph(object):
       name: Name for the new op
       op_name: Name of the type of operation for the node
       uniquify_name: Generate a unique name from this name if the graph
-        already has a node with the indicated name.
+        already has a node with the indicated name. If False, raise an
+        exception if the name is in use.
 
     Returns:
       `MutableNode` wrapper for the new node.
@@ -672,7 +670,12 @@ def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
         collection_proto.value.bytes_list.value.append(
           var_proto.SerializeToString())
       elif type(item).__name__ == "WhileContext":
+        # TODO(frreiss): Should we serialize WhileContexts?
         print("Skipping collection {} -- is WhileContext.".format(
+          collection_name))
+      elif type(item).__name__ == "CondContext":
+        # TODO(frreiss): Should we serialize CondContexts?
+        print("Skipping collection {} -- is CondContext.".format(
           collection_name))
       else:
         raise NotImplementedError("Can't serialize item '{}' in collection "
