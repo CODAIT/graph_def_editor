@@ -44,6 +44,7 @@ conda create -y --prefix ./env \
     numpy \
     tensorflow\
     jupyterlab \
+    pytest \
     -c conda-forge
 
 echo << EOM
