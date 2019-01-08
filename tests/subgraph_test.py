@@ -27,40 +27,49 @@ import gde
 class SubgraphTest(unittest.TestCase):
 
   def setUp(self):
-    self.graph = ops.Graph()
-    with self.graph.as_default():
-      self.a = constant_op.constant([1., 1.], shape=[2], name="a")
-      with ops.name_scope("foo"):
-        self.b = constant_op.constant([2., 2.], shape=[2], name="b")
-        self.c = math_ops.add(self.a, self.b, name="c")
-        self.d = constant_op.constant([3., 3.], shape=[2], name="d")
-        with ops.name_scope("bar"):
-          self.e = math_ops.add(self.c, self.d, name="e")
-          self.f = math_ops.add(self.c, self.d, name="f")
-          self.g = math_ops.add(self.c, self.a, name="g")
-          with ops.control_dependencies([self.c.op]):
-            self.h = math_ops.add(self.f, self.g, name="h")
+    tf_graph = tf.Graph()
+    with tf_graph.as_default():
+      a = tf.constant([1., 1.], shape=[2], name="a")
+      with tf.name_scope("foo"):
+        b = tf.constant([2., 2.], shape=[2], name="b")
+        c = tf.add(a, b, name="c")
+        d = tf.constant([3., 3.], shape=[2], name="d")
+        with tf.name_scope("bar"):
+          e = tf.add(c, d, name="e")
+          f = tf.add(c, d, name="f")
+          g = tf.add(c, a, name="g")
+          with tf.control_dependencies([c.op]):
+            h = tf.add(f, g, name="h")
+    self.graph = gde.Graph(tf_graph)
+    self.a = self.graph.get_tensor_by_name(a.name)
+    self.b = self.graph.get_tensor_by_name(b.name)
+    self.c = self.graph.get_tensor_by_name(c.name)
+    self.d = self.graph.get_tensor_by_name(d.name)
+    self.e = self.graph.get_tensor_by_name(e.name)
+    self.f = self.graph.get_tensor_by_name(f.name)
+    self.g = self.graph.get_tensor_by_name(g.name)
+    self.h = self.graph.get_tensor_by_name(h.name)
 
   def test_subgraph(self):
-    sgv = ge.sgv(self.graph)
+    sgv = gde.sgv(self.graph)
     self.assertEqual(list(sgv.outputs), [self.e, self.h])
     self.assertEqual(list(sgv.inputs), [])
     self.assertEqual(len(sgv.ops), 8)
 
-    sgv = ge.sgv(self.f.op, self.g.op)
+    sgv = gde.sgv(self.f.op, self.g.op)
     self.assertEqual(list(sgv.outputs), [self.f, self.g])
     self.assertEqual(list(sgv.inputs), [self.c, self.d, self.a])
 
-    sgv = ge.sgv_scope("foo/bar", graph=self.graph)
+    sgv = gde.sgv_scope("foo/bar", graph=self.graph)
     self.assertEqual(
         list(sgv.ops), [self.e.op, self.f.op, self.g.op, self.h.op])
 
   def test_subgraph_remap(self):
-    sgv = ge.sgv(self.c.op)
+    sgv = gde.sgv(self.c.op)
     self.assertEqual(list(sgv.outputs), [self.c])
     self.assertEqual(list(sgv.inputs), [self.a, self.b])
 
-    sgv = ge.sgv(self.c.op).remap([self.a], [0, self.c])
+    sgv = gde.sgv(self.c.op).remap([self.a], [0, self.c])
     self.assertEqual(list(sgv.outputs), [self.c, self.c])
     self.assertEqual(list(sgv.inputs), [self.a])
 
@@ -77,7 +86,7 @@ class SubgraphTest(unittest.TestCase):
     self.assertEqual(list(sgv.inputs), [self.a, self.b])
 
   def test_remove_unused_ops(self):
-    sgv = ge.sgv(self.graph)
+    sgv = gde.sgv(self.graph)
     self.assertEqual(list(sgv.outputs), [self.e, self.h])
     self.assertEqual(len(sgv.ops), 8)
 
