@@ -25,7 +25,7 @@ __all__ = [
   "Variable",
 ]
 
-from pge import graph
+from gde import graph
 
 
 class Variable(object):
@@ -49,7 +49,7 @@ class Variable(object):
     This constructor should only be called from `Graph.add_variable()`.
 
     Args:
-      g: pge.Graph object representing the containing graph
+      g: gde.Graph object representing the containing graph
     """
     self._graph = g
     self._collection_names = set()

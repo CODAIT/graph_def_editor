@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""PGE: Portable Graph Editor.
+"""GDE: A GraphDef Editor for TensorFlow
 
-A version of the old [`contrib.graph_editor`](https://github.com/tensorflow/tensorflow/tree/r1.12/tensorflow/contrib/graph_editor) API that uses only public APIs.
+A version of the old [`contrib.graph_editor`](https://github.com/tensorflow/tensorflow/tree/r1.12/tensorflow/contrib/graph_editor) API that operates over serialized TensorFlow graphs represented as GraphDef protocol buffer messages.
 """
 
 from __future__ import absolute_import
@@ -23,22 +23,22 @@ from __future__ import division
 from __future__ import print_function
 
 # pylint: disable=wildcard-import
-from pge.edit import *
-from pge.graph import *
-from pge.match import *
-from pge.node import *
-from pge.reroute import *
-from pge.select import *
-from pge.subgraph import *
-from pge.transform import *
-from pge.util import *
-from pge.variable import *
+from gde.edit import *
+from gde.graph import *
+from gde.match import *
+from gde.node import *
+from gde.reroute import *
+from gde.select import *
+from gde.subgraph import *
+from gde.transform import *
+from gde.util import *
+from gde.variable import *
 # pylint: enable=wildcard-import
 
 # some useful aliases
 # pylint: disable=g-bad-import-order
-from pge import subgraph as _subgraph
-from pge import util as _util
+from gde import subgraph as _subgraph
+from gde import util as _util
 # pylint: enable=g-bad-import-order
 ph = _util.make_placeholder_from_dtype_and_shape
 sgv = _subgraph.make_view

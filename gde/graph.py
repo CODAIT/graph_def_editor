@@ -21,9 +21,9 @@ from __future__ import print_function
 import tensorflow as tf
 from typing import Tuple, Dict, FrozenSet, Iterable
 
-from pge import node
-from pge import util
-from pge import variable
+from gde import node
+from gde import util
+from gde import variable
 
 __all__ = [
   "Graph",
@@ -128,7 +128,7 @@ class Graph(object):
     Variables that do not already exist will be created.
     """
     collection_name = collection_def.key
-    print("Adding collection '{}' to pge.Graph".format(collection_name))
+    print("Adding collection '{}' to gde.Graph".format(collection_name))
     for serialized_var in collection_def.value.bytes_list.value:
       print("Serialized var: {} of type {}".format(serialized_var,
                                                    type(serialized_var)))
@@ -227,7 +227,7 @@ class Graph(object):
     Args:
       name: Name of the variable. Must not already be in use.
 
-    Returns the `pge.Variable` object corresponding to the added variable.
+    Returns the `gde.Variable` object corresponding to the added variable.
     """
     if name in self._variable_name_to_variable:
       raise ValueError("Variable name '{}' already in use".format(name))
@@ -248,7 +248,7 @@ class Graph(object):
       skip_if_present: If True, silently skips inserting duplicate variables,
         as long as they don't conflict with existing variables.
 
-    Returns the `pge.Variable` object corresponding to the added variable.
+    Returns the `gde.Variable` object corresponding to the added variable.
     """
     v = variable.Variable(self)
     v.from_proto(variable_def, allow_duplicates=skip_if_present)
@@ -349,7 +349,7 @@ class Graph(object):
         serve as an input to `str.format()` with two arguments: tensor name
         string and reason for failure.
 
-    Returns: pge.Tensor object corresponding to the indicated tensor.
+    Returns: gde.Tensor object corresponding to the indicated tensor.
 
     Raises ValueError if the name is invalid or references a tensor that does
     not exist.

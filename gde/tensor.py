@@ -29,7 +29,7 @@ class Tensor(object):
   def __init__(self, node, index, dtype: tf.DType, shape: tf.shape):
     """
     Args:
-      node: pge.Node object that represents the graph node that produces this
+      node: gde.Node object that represents the graph node that produces this
         tensor
       index: Output index of this tensor among the outputs of the specified node
       dtype: Data type of the tensor
@@ -76,12 +76,12 @@ class Tensor(object):
 
   @property
   def graph(self):
-    """Returns the `pge.Graph` object representing the graph in which the
+    """Returns the `gde.Graph` object representing the graph in which the
     node that produces this tensor resides."""
     return self._node.graph
 
   def consumers(self):
-    """Returns the `pge.Node` objects representing the ops that consume the
+    """Returns the `gde.Node` objects representing the ops that consume the
     tensor that this object represents."""
     # TODO: Maintain a lookup table of graph edges.
     # For now we do linear search for correctness.

@@ -21,9 +21,9 @@ from __future__ import print_function
 import tensorflow as tf
 from typing import Tuple, List, Iterable, Any
 
-from pge import graph
-from pge import tensor
-from pge import util
+from gde import graph
+from gde import tensor
+from gde import util
 
 # Magical attribute name that TensorFlow uses to store colocation groups.
 # See colocation_groups property below for more information.
@@ -93,7 +93,7 @@ class Node(object):
   def graph(self) -> 'graph.Graph':
     """
     Returns:
-      `pge.Graph` object representing the graph in which this Node resides.
+      `gde.Graph` object representing the graph in which this Node resides.
     """
     return self._graph
 
@@ -109,7 +109,7 @@ class Node(object):
   def outputs(self):
     """
     Returns:
-      Tuple (i.e. immutable list) of `pge.Tensor` objects representing the
+      Tuple (i.e. immutable list) of `gde.Tensor` objects representing the
       current outputs of this node. Note that this tuple does not change if
       the underlying node is mutable and gets edited.
     """
@@ -128,7 +128,7 @@ class Node(object):
   def inputs(self) -> Tuple[tensor.Tensor]:
     """
     Returns:
-      Tuple (i.e. immutable list) of `pge.Tensor` objects representing the
+      Tuple (i.e. immutable list) of `gde.Tensor` objects representing the
       current inputs of this node. Note that the returned value is immutable
       for a reason. Do not attempt to modify it.
     """
@@ -175,7 +175,7 @@ class Node(object):
   def control_inputs(self) -> Tuple['Node']:
     """
     Returns:
-      Tuple (i.e. immutable list) of `pge.Node` objects representing the
+      Tuple (i.e. immutable list) of `gde.Node` objects representing the
       nodes that have control edges to this node.
     """
     return tuple(self._control_inputs)

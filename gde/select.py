@@ -24,9 +24,9 @@ import re
 from six import iteritems
 from six import string_types
 
-from pge.graph import Graph
-from pge.tensor import Tensor
-from pge import util
+from gde.graph import Graph
+from gde.tensor import Tensor
+from gde import util
 
 __all__ = [
     "can_be_regex",
@@ -288,7 +288,7 @@ def compute_boundary_ts(ops):
   consumed by operations both outside and inside of `ops`.
 
   Args:
-    ops: an object convertible to a list of `pge.Node`
+    ops: an object convertible to a list of `gde.Node`
   Returns:
     A tuple `(outside_input_ts, outside_output_ts, inside_ts)` where:
       `outside_input_ts` is a Python list of input tensors;
@@ -736,7 +736,7 @@ def select_ts(*args, **kwargs):
     if k == "graph":
       cur_graph = v
       if cur_graph is not None and not isinstance(cur_graph, Graph):
-        raise TypeError("Expected a pge.Graph, got {}".format(type(cur_graph)))
+        raise TypeError("Expected a gde.Graph, got {}".format(type(cur_graph)))
     elif k == "positive_filter":
       positive_filter = v
     elif k == "restrict_ts_regex":

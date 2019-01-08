@@ -21,7 +21,7 @@ from __future__ import print_function
 import tensorflow as tf
 import unittest
 
-import pge
+import gde
 
 
 class MatchTest(unittest.TestCase):

@@ -26,8 +26,8 @@ from six import iteritems
 from six import StringIO
 import tensorflow as tf
 
-from pge import select
-from pge import util
+from gde import select
+from gde import util
 
 __all__ = [
     "SubGraphView",

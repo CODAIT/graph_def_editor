@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Utility functions for pge
+"""Utility functions for gde
 """
 
 from __future__ import absolute_import
@@ -28,9 +28,9 @@ import numpy as np
 from six import iteritems
 import tensorflow as tf
 
-from pge import graph
-from pge import node
-from pge import tensor
+from gde import graph
+from gde import node
+from gde import tensor
 
 __all__ = [
   "make_list_of_op",
@@ -192,10 +192,10 @@ def get_unique_graph(tops, check_types=None, none_if_empty=False):
   """Return the unique graph used by the all the elements in tops.
 
   Args:
-    tops: list of elements to check (usually a list of pge.Tensor). Or a
-      pge.Graph.
+    tops: list of elements to check (usually a list of gde.Tensor). Or a
+      gde.Graph.
     check_types: check that the element in tops are of given type(s). If None,
-      the types (pge.Node, pge.Tensor) are used.
+      the types (gde.Node, gde.Tensor) are used.
     none_if_empty: don't raise an error if tops is an empty list, just return
       None.
   Returns:
@@ -227,13 +227,13 @@ def get_unique_graph(tops, check_types=None, none_if_empty=False):
 
 
 def make_list_of_op(ops, check_graph=True, allow_graph=True, ignore_ts=False):
-  """Convert ops to a list of `pge.Node`.
+  """Convert ops to a list of `gde.Node`.
 
   Args:
-    ops: can be an iterable of `pge.Node`, a `tf.Graph` or a single
+    ops: can be an iterable of `gde.Node`, a `tf.Graph` or a single
       Node.
     check_graph: if `True` check if all the nodes belong to the same graph.
-    allow_graph: if `False` a `pge.Graph` cannot be converted.
+    allow_graph: if `False` a `gde.Graph` cannot be converted.
     ignore_ts: if True, silently ignore `tf.Tensor`.
   Returns:
     A newly created list of `tf.Operation`.
@@ -262,21 +262,21 @@ def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False):
   """Convert ts to a list of `tf.Tensor`.
 
   Args:
-    ts: can be an iterable of `pge.Tensor`, a `pge.Graph` or a single tensor.
+    ts: can be an iterable of `gde.Tensor`, a `gde.Graph` or a single tensor.
     check_graph: if `True` check if all the tensors belong to the same graph.
-    allow_graph: if `False` a `pge.Graph` cannot be converted.
+    allow_graph: if `False` a `gde.Graph` cannot be converted.
     ignore_ops: if `True`, silently ignore `tf.Operation`.
   Returns:
-    A newly created list of `pge.Tensor`.
+    A newly created list of `gde.Tensor`.
   Raises:
-    TypeError: if `ts` cannot be converted to a list of `pge.Tensor` or,
+    TypeError: if `ts` cannot be converted to a list of `gde.Tensor` or,
      if `check_graph` is `True`, if all the ops do not belong to the same graph.
   """
   if isinstance(ts, graph.Graph):
     if allow_graph:
       return ts.tensors
     else:
-      raise TypeError("allow_graph is False: cannot convert a pge.Graph.")
+      raise TypeError("allow_graph is False: cannot convert a gde.Graph.")
   else:
     if not is_iterable(ts):
       ts = [ts]
@@ -292,12 +292,12 @@ def get_generating_ops(ts):
   """Return all the generating ops of the tensors in `ts`.
 
   Args:
-    ts: a list of `pge.Tensor`
+    ts: a list of `gde.Tensor`
   Returns:
-    A list of all the `pge.Node` objects that represent the generating
+    A list of all the `gde.Node` objects that represent the generating
     `tf.Operation`s of the tensors in `ts`.
   Raises:
-    TypeError: if `ts` cannot be converted to a list of `pge.Tensor`.
+    TypeError: if `ts` cannot be converted to a list of `gde.Tensor`.
   """
   ts = make_list_of_t(ts, allow_graph=False)
   return [t.node for t in ts]
@@ -307,12 +307,12 @@ def get_consuming_ops(ts):
   """Return all the consuming ops of the tensors in ts.
 
   Args:
-    ts: a list of `pge.Tensor`
+    ts: a list of `gde.Tensor`
   Returns:
-    A list of all the `pge.Node` objects that represent the consuming
+    A list of all the `gde.Node` objects that represent the consuming
     `tf.Operation`s of the tensors in `ts`.
   Raises:
-    TypeError: if ts cannot be converted to a list of `pge.Tensor`.
+    TypeError: if ts cannot be converted to a list of `gde.Tensor`.
   """
   ts = make_list_of_t(ts, allow_graph=False)
   ops = []
@@ -330,16 +330,16 @@ class ControlOutputs(object):
     """Create a dictionary of control-output dependencies.
 
     Args:
-      g: a `pge.Graph`.
+      g: a `gde.Graph`.
     Returns:
-      A dictionary where a key is `pge.Node` object and the corresponding value
+      A dictionary where a key is `gde.Node` object and the corresponding value
       is a list of all the ops which have the keys one of their control-input
       dependencies.
     Raises:
-      TypeError: graph is not a `pge.Graph`.
+      TypeError: graph is not a `gde.Graph`.
     """
     if not isinstance(g, graph.Graph):
-      raise TypeError("Expected a pge.Graph, got: {}".format(type(g)))
+      raise TypeError("Expected a gde.Graph, got: {}".format(type(g)))
     self._control_outputs = {}
     self._graph = g
     self._version = None
@@ -401,7 +401,7 @@ def placeholder_name(t=None, scope=None, prefix=_DEFAULT_PLACEHOLDER_PREFIX):
   """Create placeholder name for the graph editor.
 
   Args:
-    t: optional `pge.Tensor` on which the placeholder operation's name will be
+    t: optional `gde.Tensor` on which the placeholder operation's name will be
       based on
     scope: absolute scope with which to prefix the placeholder's name. None
       means that the scope of t is preserved. "" means the root scope.
@@ -417,7 +417,7 @@ def placeholder_name(t=None, scope=None, prefix=_DEFAULT_PLACEHOLDER_PREFIX):
     scope = scope_finalize(scope)
   if t is not None:
     if not isinstance(t, tensor.Tensor):
-      raise TypeError("Expected a pge.Tensor, got: {}".format(type(t)))
+      raise TypeError("Expected a gde.Tensor, got: {}".format(type(t)))
     op_dirname = scope_dirname(t.node.name)
     op_basename = scope_basename(t.node.name)
     if scope is None:
@@ -459,18 +459,18 @@ def _make_placeholder(g: 'g.Graph',
 
 def make_placeholder_from_tensor(g: 'graph.Graph', t: tensor.Tensor, scope=None,
                                  prefix=_DEFAULT_PLACEHOLDER_PREFIX):
-  """Create a `pge.Node` representing a `tf.placeholder` for the Graph Editor.
+  """Create a `gde.Node` representing a `tf.placeholder` for the Graph Editor.
 
   Note that the correct graph scope must be set by the calling function.
 
   Args:
-    g: A `pge.Graph` object in which the placeholder should go.
-    t: a `pge.Tensor` whose name will be used to create the placeholder
+    g: A `gde.Graph` object in which the placeholder should go.
+    t: a `gde.Tensor` whose name will be used to create the placeholder
     scope: absolute scope within which to create the placeholder. None
       means that the scope of `t` is preserved. `""` means the root scope.
     prefix: placeholder name prefix.
   Returns:
-    A newly created `pge.Node` that represents the `tf.placeholder`.
+    A newly created `gde.Node` that represents the `tf.placeholder`.
   Raises:
     TypeError: if `t` is not `None` or a `tf.Tensor`.
   """
@@ -481,14 +481,14 @@ def make_placeholder_from_tensor(g: 'graph.Graph', t: tensor.Tensor, scope=None,
 
 def make_placeholder_from_dtype_and_shape(g, dtype, shape=None, scope=None,
                                           prefix=_DEFAULT_PLACEHOLDER_PREFIX):
-  """Create a `pge.Node` representing a `tf.placeholder` for the Graph Editor.
+  """Create a `gde.Node` representing a `tf.placeholder` for the Graph Editor.
 
   Note that the correct graph scope must be set by the calling function.
   The placeholder is named using the function placeholder_name (with no
   tensor argument).
 
   Args:
-    g: A `pge.Graph` object in which the placeholder should go.
+    g: A `gde.Graph` object in which the placeholder should go.
     dtype: the tensor type.
     shape: the tensor shape (optional).
     scope: absolute scope within which to create the placeholder. None
@@ -690,12 +690,12 @@ def attr_value_to_python_type(attr_value: tf.AttrValue) -> Any:
 
 def load_variables_to_tf_graph(g: 'graph.Graph'):
   """
-  Convenience function to load all variables present in a `pge.Graph` into
+  Convenience function to load all variables present in a `gde.Graph` into
   the current default TensorFlow graph, without generating a MetaGraphDef.
   Also adds those variables to the appropriate TensorFlow collections.
 
   Args:
-    g: `pge.Graph` object from which all variables and variable collections
+    g: `gde.Graph` object from which all variables and variable collections
       should be loaded
   """
   for var_name in g.variable_names:

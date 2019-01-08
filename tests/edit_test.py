@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Tests for pge"""
+"""Tests for gde.edit"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -22,7 +22,7 @@ import tensorflow as tf
 import unittest
 
 
-import pge
+import gde
 
 
 class EditTest(unittest.TestCase):

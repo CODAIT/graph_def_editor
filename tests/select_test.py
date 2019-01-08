@@ -23,7 +23,7 @@ import re
 import tensorflow as tf
 import unittest
 
-import pge
+import gde
 
 
 class SelectTest(unittest.TestCase):

@@ -29,12 +29,12 @@ from six import StringIO
 import tensorflow as tf
 from typing import Iterable
 
-from pge import select
-from pge import subgraph
-from pge import util
-from pge.node import Node
-from pge.graph import Graph
-from pge.tensor import Tensor
+from gde import select
+from gde import subgraph
+from gde import util
+from gde.node import Node
+from gde.graph import Graph
+from gde.tensor import Tensor
 
 
 __all__ = [
@@ -602,7 +602,7 @@ def copy(sgv, dst_graph=None, dst_scope="", src_scope="",
       information about the transform, including mapping between
       original and transformed tensors and operations.
   Raises:
-    TypeError: if `dst_graph` is not a `pge.Graph`.
+    TypeError: if `dst_graph` is not a `gde.Graph`.
     StandardError: if sgv cannot be converted to a SubGraphView using
       the same rules than the function subgraph.make_view.
   """
@@ -610,7 +610,7 @@ def copy(sgv, dst_graph=None, dst_scope="", src_scope="",
   if dst_graph is None:
     dst_graph = sgv.graph
   if not isinstance(dst_graph, Graph):
-    raise TypeError("Expected a pge.Graph, got: {}".format(type(dst_graph)))
+    raise TypeError("Expected a gde.Graph, got: {}".format(type(dst_graph)))
 
   copier = Transformer()
   return copier(
@@ -652,7 +652,7 @@ def copy_with_input_replacements(sgv, replacement_ts,
   if dst_graph is None:
     dst_graph = sgv.graph
   if not isinstance(dst_graph, Graph):
-    raise TypeError("Expected a pge.Graph, got: {}".format(type(dst_graph)))
+    raise TypeError("Expected a gde.Graph, got: {}".format(type(dst_graph)))
 
   copier = Transformer()
 
@@ -770,7 +770,7 @@ def graph_replace(target_ts, replacement_ts, dst_scope="",
   """Create a new graph which computes the targets from the replaced Tensors.
 
   Args:
-    target_ts: a single pge.Tensor or an iterable of pge.Tensor.
+    target_ts: a single gde.Tensor or an iterable of gde.Tensor.
     replacement_ts: dictionary mapping from original tensors to replaced tensors
     dst_scope: the destination scope.
     src_scope: the source scope.
@@ -778,7 +778,7 @@ def graph_replace(target_ts, replacement_ts, dst_scope="",
       Otherwise, the scope is given a unique name based on the one given
       by appending an underscore followed by a digit (default).
   Returns:
-    A single pge.Tensor or a list of target pge.Tensor, depending on
+    A single gde.Tensor or a list of target gde.Tensor, depending on
     the type of the input argument `target_ts`.
     The returned tensors are recomputed using the tensors from replacement_ts.
   Raises:

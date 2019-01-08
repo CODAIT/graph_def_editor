@@ -25,7 +25,7 @@ import numpy as np
 import tensorflow as tf
 import unittest
 
-import pge
+import gde
 
 # Precision tolerance for floating-point value tests.
 ERROR_TOLERANCE = 1e-3
@@ -60,7 +60,7 @@ class TransformTest(unittest.TestCase):
       c2 = tf.constant(1.0, shape=[10], name="Const")
       i = tf.constant(1.0, shape=[10], name="Input")
       tf.identity(tf.add(c2, tf.add(c1, tf.add(c0, i))), name="o")
-    self.graph = pge.Graph(tf_graph)
+    self.graph = gde.Graph(tf_graph)
     self.o = self.graph["o"]
 
   def test_copy(self):
@@ -99,11 +99,11 @@ class TransformTest(unittest.TestCase):
     self.assertIsNotNone(new_assert_op)
 
   def test_transform(self):
-    transformer = pge.Transformer()
+    transformer = gde.Transformer()
 
     def my_transform_op_handler(info, op, new_inputs):
       add_noise = op.name.startswith("Add")
-      op_, op_outputs_ = pge.transform.copy_op_handler(info, op, new_inputs)
+      op_, op_outputs_ = gde.transform.copy_op_handler(info, op, new_inputs)
       if not add_noise:
         return op_, op_outputs_
 
@@ -129,19 +129,19 @@ class TransformTest(unittest.TestCase):
 
     transformer.transform_op_handler = my_transform_op_handler
 
-    graph = pge.Graph()
+    graph = gde.Graph()
     transformer(self.graph, graph, "", "")
-    matcher0 = pge.OpMatcher("AddNoise").input_ops(
-        "Noise", pge.OpMatcher("Add").input_ops("Const", "Input"))
-    matcher1 = pge.OpMatcher("AddNoise_1").input_ops(
-        "Noise_1", pge.OpMatcher("Add_1").input_ops("Const_1", matcher0))
-    matcher2 = pge.OpMatcher("AddNoise_2").input_ops(
-        "Noise_2", pge.OpMatcher("Add_2").input_ops("Const_2", matcher1))
-    top = pge.select_ops("^AddNoise_2$", graph=graph)[0]
+    matcher0 = gde.OpMatcher("AddNoise").input_ops(
+        "Noise", gde.OpMatcher("Add").input_ops("Const", "Input"))
+    matcher1 = gde.OpMatcher("AddNoise_1").input_ops(
+        "Noise_1", gde.OpMatcher("Add_1").input_ops("Const_1", matcher0))
+    matcher2 = gde.OpMatcher("AddNoise_2").input_ops(
+        "Noise_2", gde.OpMatcher("Add_2").input_ops("Const_2", matcher1))
+    top = gde.select_ops("^AddNoise_2$", graph=graph)[0]
     self.assertTrue(matcher2(top))
 
   def test_transform_nodedef_fn(self):
-    transformer = pge.Transformer()
+    transformer = gde.Transformer()
 
     def nodedef_fn(node_def):
       if "_foo" in node_def.attr:
@@ -150,10 +150,10 @@ class TransformTest(unittest.TestCase):
       return node_def
 
     my_copy_op_handler = functools.partial(
-        pge.transform.copy_op_handler, nodedef_fn=nodedef_fn)
+        gde.transform.copy_op_handler, nodedef_fn=nodedef_fn)
     transformer.transform_op_handler = my_copy_op_handler
 
-    graph = pge.Graph()
+    graph = gde.Graph()
     transformer(self.graph, graph, "", "")
 
     c0_before = self.graph["Const"]
@@ -191,7 +191,7 @@ class TransformTest(unittest.TestCase):
       eps = tf.constant(0.001, name="eps")
       tf.identity(a + b + eps, name="c")
       tf.constant(2.0, name="a_new")
-    ret = pge.Graph(tmp_graph)
+    ret = gde.Graph(tmp_graph)
     return ret, ret["a"].output(0), ret["a_new"].output(0), ret["c"].output(0)
 
   def test_graph_replace(self):
@@ -226,13 +226,13 @@ class TransformTest(unittest.TestCase):
 
   def test_graph_replace_ordered_dict(self):
     g, a, a_new, c = self._create_replace_graph()
-    c_new = pge.graph_replace(collections.OrderedDict({"c": c}), {a: a_new})
+    c_new = gde.graph_replace(collections.OrderedDict({"c": c}), {a: a_new})
     self.assertTrue(isinstance(c_new, collections.OrderedDict))
 
   def test_graph_replace_named_tuple(self):
     g, a, a_new, c = self._create_replace_graph()
     one_tensor = collections.namedtuple("OneTensor", ["t"])
-    c_new = pge.graph_replace(one_tensor(c), {a: a_new})
+    c_new = gde.graph_replace(one_tensor(c), {a: a_new})
     self.assertTrue(isinstance(c_new, one_tensor))
 
   def test_graph_replace_missing(self):
@@ -242,8 +242,8 @@ class TransformTest(unittest.TestCase):
       b_tensor = tf.constant(2.0, name="b")
       _ = tf.add(a_tensor, 2 * b_tensor, name="c")
       _ = tf.constant(2.0, name="d")
-    g = pge.Graph(tmp_graph)
-    res = pge.graph_replace([g["b"].output(0), g["c"].output(0)],
+    g = gde.Graph(tmp_graph)
+    res = gde.graph_replace([g["b"].output(0), g["c"].output(0)],
                             {g["a"].output(0): g["d"].output(0)})
     self.assertEqual(res[0].name, "b:0")
     self.assertEqual(res[1].name, "c_1:0")
@@ -257,20 +257,20 @@ class TransformTest(unittest.TestCase):
       grad_tensor = tf.gradients(y_tensor, w_tensor, name="gradient")[0]
       _ = tf.identity(grad_tensor, "grad")
 
-    g = pge.Graph(tmp_graph)
+    g = gde.Graph(tmp_graph)
 
     # Extract the operations.
     replacement_ts = {g["w/read"].output(0): g["grad"].output(0)}
 
     # Should not raise exception.
-    res = pge.graph_replace(g["grad"].output(0), replacement_ts,
+    res = gde.graph_replace(g["grad"].output(0), replacement_ts,
                             dst_scope="res")
 
     self.assertNotEqual(res.name, g["grad"].output(0).name)
     after_graph = tf.Graph()
     with after_graph.as_default():
       tf.import_graph_def(g.to_graph_def(), name="")
-      pge.util.load_variables_to_tf_graph(g)
+      gde.util.load_variables_to_tf_graph(g)
       with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         g_val, res_val = sess.run([g["grad"].output(0).name, res.name])
@@ -287,13 +287,13 @@ class TransformTest(unittest.TestCase):
           cond=lambda i, unused_s: i <= max_index,
           body=lambda i, s: (i + 1, s + i),
           loop_vars=[index_start, sum_start])
-    g = pge.Graph(tf_graph)
+    g = gde.Graph(tf_graph)
     result_tensor = g[result.op.name].output(0)
     max_index_tensor = g[max_index.op.name].output(0)
 
     g.frozen = True
-    copied_graph = pge.Graph()
-    _, copy_info = pge.copy(
+    copied_graph = gde.Graph()
+    _, copy_info = gde.copy(
         g, dst_graph=copied_graph, dst_scope="imported")
     copied_result_tensor = copy_info.transformed(result_tensor)
     copied_max_index_tensor = copy_info.transformed(max_index_tensor)

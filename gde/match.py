@@ -23,8 +23,8 @@ from six import string_types
 
 import tensorflow as tf
 
-from pge import node
-from pge import select
+from gde import node
+from gde import select
 
 __all__ = [
     "op_type",
@@ -89,7 +89,7 @@ class OpMatcher(object):
   def __call__(self, op):
     """Evaluate if the op matches or not."""
     if not isinstance(op, node.Node):
-      raise TypeError("Expect pge.Node, got: {}".format(type(op)))
+      raise TypeError("Expect gde.Node, got: {}".format(type(op)))
     for positive_filter in self.positive_filters:
       if not positive_filter(op):
         return False
