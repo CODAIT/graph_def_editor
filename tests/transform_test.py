@@ -218,10 +218,7 @@ class TransformTest(unittest.TestCase):
     g, a, a_new, c = self._create_replace_graph()
     c_new = gde.graph_replace(c, {a: a_new})
 
-    after_graph = tf.Graph()
-    with after_graph.as_default():
-      tf.import_graph_def(g.to_graph_def(), name="")
-      gde.util.load_variables_to_tf_graph(g)
+    with g.to_tf_graph().as_default():
       with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         c_val, c_new_val = sess.run([c.name, c_new.name])
@@ -234,10 +231,7 @@ class TransformTest(unittest.TestCase):
     c_new = gde.graph_replace({"c": c}, {a: a_new})
     self.assertTrue(isinstance(c_new, dict))
 
-    after_graph = tf.Graph()
-    with after_graph.as_default():
-      tf.import_graph_def(g.to_graph_def(), name="")
-      gde.util.load_variables_to_tf_graph(g)
+    with g.to_tf_graph().as_default():
       with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         c_val, c_new_val = sess.run([c.name,

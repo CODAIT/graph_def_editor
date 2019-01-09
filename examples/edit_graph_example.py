@@ -22,15 +22,15 @@ from __future__ import print_function
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.contrib import graph_editor as ge
+import graph_def_editor as gde
 
 FLAGS = tf.flags.FLAGS
 
 
 def main(_):
-  # create a graph
-  g = tf.Graph()
-  with g.as_default():
+  # Create a graph
+  tf_g = tf.Graph()
+  with tf_g.as_default():
     a = tf.constant(1.0, shape=[2, 3], name="a")
     b = tf.constant(2.0, shape=[2, 3], name="b")
     c = tf.add(
@@ -38,16 +38,21 @@ def main(_):
         tf.placeholder(dtype=np.float32),
         name="c")
 
-  # modify the graph
-  ge.swap_inputs(c.op, [a, b])
+  # Serialize the graph
+  g = gde.Graph(g.as_graph_def())
+  print("Before:\n{}".format(g.to_graph_def()))
 
-  # print the graph def
-  print(g.as_graph_def())
+  # Modify the graph
+  gde.swap_inputs(g[c.op.name], [g[a.name], g[b.name]])
 
-  # and print the value of c
-  with tf.Session(graph=g) as sess:
-    res = sess.run(c)
-    print(res)
+  print("After:\n{}".format(g.to_graph_def()))
+
+  # Reconstitute the modified serialized graph as TensorFlow graph...
+  with g.to_tf_graph().as_default():
+    # ...and print the value of c
+    with tf.Session() as sess:
+      res = sess.run(c.name)
+      print(res)
 
 
 if __name__ == "__main__":

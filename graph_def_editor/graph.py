@@ -19,9 +19,9 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
-from typing import Tuple, Dict, FrozenSet, Iterable
+from typing import Tuple, Dict, FrozenSet, Iterable, Union
 
-from graph_def_editor import node, util, variable
+from graph_def_editor import node, util, tensor, variable
 
 __all__ = [
   "Graph",
@@ -131,17 +131,35 @@ class Graph(object):
                                                 skip_if_present=True)
       var.add_to_collection(collection_name)
 
-  def __getitem__(self, name: str) -> 'node.Node':
+  def __getitem__(self, name: str) -> Union[tensor.Tensor, 'node.Node']:
     """
-    Retrieve a node of the graph by name
+    Convenience method to retrieve a node or tensor of the graph by name
 
     Args:
-      name: Name of the node to return
+      name: Name of the node or tensor to return. Case-sensitive.
+
+    Returns the named item as a `gde.Node` or `gde.Tensor` object. If there
+    is a conflict between node and tensor names, node names win.
     """
     if not isinstance(name, str):
       raise TypeError("name must be a string; got type {}".format(type(name)))
 
-    # Search the diffs first, then go back to the original immutable graph
+    if self.contains_node(name):
+      return self._node_name_to_node[name]
+    elif self.contains_tensor(name):
+      return self.get_tensor_by_name(name)
+    else:
+      raise ValueError("No node or tensor '{}' found in graph".format(name))
+
+  def get_node_by_name(self, name: str):
+    """
+    Retrieve a node in the graph by name.
+
+    Args:
+      name: Name of the node. Case-sensitive.
+
+    Returns the indicated node as a `gde.Node` object.
+    """
     if self.contains_node(name):
       return self._node_name_to_node[name]
     else:
@@ -335,12 +353,35 @@ class Graph(object):
       ts += op.outputs
     return ts
 
+  def contains_tensor(self, tensor_name: str) -> bool:
+    """
+    Returns true if the graph has a tensor by the indicated name. Exact string
+    match.
+
+    Args:
+      tensor_name: TensorFlow-format name ('node name:input num', or 'node
+        name' as shorthand for 'node name:0')
+
+    Raises ValueError if the tensor name is not properly formatted.
+    """
+    error_msg = "Invalid tensor name '{}': {}"
+    node_name, output_ix = _decode_tensor_name(tensor_name, error_msg)
+    if node_name not in self._node_name_to_node:
+      return False
+    else:
+      n = self[node_name]
+      if output_ix >= len(n.outputs):
+        return False
+      else:
+        return True
+
   def get_tensor_by_name(self, tensor_name: str, error_msg: str = None):
     """
     Retrieve a tensor by human-readable name.
 
     Args:
-      tensor_name: TensorFlow-format name ('node name:input num')
+      tensor_name: TensorFlow-format name ('node name:input num', or 'node
+        name' as shorthand for 'node name:0')
       error_msg: Optional format string for raising errors. Must be able to
         serve as an input to `str.format()` with two arguments: tensor name
         string and reason for failure.
@@ -352,17 +393,7 @@ class Graph(object):
     """
     if error_msg is None:
       error_msg = "Invalid tensor name '{}': {}"
-
-    if ":" in tensor_name:
-      node_name, output_ix_str = tensor_name.split(":")
-      if not output_ix_str.isdigit():
-        raise ValueError(error_msg.format(
-          tensor_name, "Invalid output index string '{}'.".format(output_ix_str)
-        ))
-      output_ix = int(output_ix_str)
-    else:
-      node_name = tensor_name
-      output_ix = 0
+    node_name, output_ix = _decode_tensor_name(tensor_name, error_msg)
     if node_name not in self._node_name_to_node:
       raise ValueError(error_msg.format(
         tensor_name, "Node name '{}' not found in graph.".format(node_name)
@@ -373,7 +404,7 @@ class Graph(object):
         tensor_name, "Requested output {}, but node '{}' has {} "
                      "outputs.".format(output_ix, node_name, len(n.outputs))
       ))
-    return n.output(int(output_ix_str))
+    return n.output(output_ix)
 
   def to_graph_def(self):
     """
@@ -383,6 +414,20 @@ class Graph(object):
     ret = tf.GraphDef()
     for op in self.nodes:
       op.to_node_def(ret.node.add())
+    return ret
+
+  def to_tf_graph(self):
+    """
+    Converts this graph into a new TensorFlow `Graph`. Also takes care of
+    variables.
+
+    Returns a fresh `tf.Graph` containing all the nodes and variables that
+    this object represents.
+    """
+    ret = tf.Graph()
+    with ret.as_default():
+      tf.import_graph_def(self.to_graph_def(), name="")
+      util.load_variables_to_tf_graph(self)
     return ret
 
   @property
@@ -684,3 +729,29 @@ def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
     ret.append(collection_proto)
   return ret
 
+
+def _decode_tensor_name(tensor_name: str, error_msg: str):
+  """
+  Args:
+    tensor_name: TensorFlow-format name ('node name:input num', or 'node
+      name' as shorthand for 'node name:0')
+    error_msg: Format string for raising errors. Must be able to
+      serve as an input to `str.format()` with two arguments: tensor name
+      string and reason for failure.
+
+  Returns: (node name, output index) tuple identifying the tensor
+
+  Raises ValueError if the name is not properly formatted
+  """
+  if ":" in tensor_name:
+    node_name, output_ix_str = tensor_name.split(":")
+    if not output_ix_str.isdigit():
+      raise ValueError(error_msg.format(
+        tensor_name, "Invalid output index string '{}'.".format(output_ix_str)
+      ))
+    output_ix = int(output_ix_str)
+  else:
+    node_name = tensor_name
+    output_ix = 0
+
+  return node_name, output_ix

@@ -29,8 +29,8 @@ TODO: Example usage
 
 Current status:
 
-* All of the original project's regression tests pass
-* Examples from the original project have not yet been ported
+* All of the original project's regression tests pass.
+* The simple example script from the original project runs.
 
 ## Contents of root directory:
 
