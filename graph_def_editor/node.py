@@ -21,9 +21,7 @@ from __future__ import print_function
 import tensorflow as tf
 from typing import Tuple, List, Iterable, Any
 
-from gde import graph
-from gde import tensor
-from gde import util
+from graph_def_editor import graph, tensor, util
 
 # Magical attribute name that TensorFlow uses to store colocation groups.
 # See colocation_groups property below for more information.

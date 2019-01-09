@@ -22,15 +22,14 @@ from __future__ import print_function
 
 import collections
 import re
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 from six import iteritems
 import tensorflow as tf
 
-from gde import graph
-from gde import node
-from gde import tensor
+from graph_def_editor import graph, node, tensor
+
 
 __all__ = [
   "make_list_of_op",

@@ -22,7 +22,7 @@ import numpy as np
 import tensorflow as tf
 import unittest
 
-import gde
+import graph_def_editor as gde
 
 
 class RerouteTest(unittest.TestCase):
@@ -58,10 +58,10 @@ class RerouteTest(unittest.TestCase):
     #   a3 = constant_op.constant(3.0, shape=[2], name="a3")
     # New code adds a NodeDef to the graph:
     a3_node = gde.make_const(self.graph, "a3", np.full([2], 3.0,
-                                                       dtype=np.float32))
+                                                                    dtype=np.float32))
 
     gde.swap_ios(gde.sgv(a3_node).remap_outputs([0, 0]),
-                 gde.sgv(self.a0.op, self.a1.op))
+                              gde.sgv(self.a0.op, self.a1.op))
     self.assertTrue(gde.OpMatcher("c0").input_ops("a3", "b0")(self.c0.op))
     self.assertTrue(gde.OpMatcher("c1").input_ops("a3", "b1")(self.c1.op))
 

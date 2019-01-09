@@ -20,7 +20,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import collections
 from functools import partial
 from six import iteritems
 from six import iterkeys
@@ -29,12 +28,10 @@ from six import StringIO
 import tensorflow as tf
 from typing import Iterable
 
-from gde import select
-from gde import subgraph
-from gde import util
-from gde.node import Node
-from gde.graph import Graph
-from gde.tensor import Tensor
+from graph_def_editor import select, subgraph, util
+from graph_def_editor.node import Node
+from graph_def_editor.graph import Graph
+from graph_def_editor.tensor import Tensor
 
 
 __all__ = [

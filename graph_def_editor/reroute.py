@@ -18,13 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import tensorflow as tf
-
-from gde import graph
-from gde import node
-from gde import tensor
-from gde import util
-from gde import subgraph
+from graph_def_editor import node, subgraph, util
 
 _allowed_symbols = [
     "swap_ts",

@@ -22,7 +22,7 @@ import numpy as np
 import tensorflow as tf
 import unittest
 
-import gde
+import graph_def_editor as gde
 
 
 class EditTest(unittest.TestCase):

@@ -21,7 +21,7 @@ from __future__ import print_function
 import tensorflow as tf
 import unittest
 
-import gde
+import graph_def_editor as gde
 
 
 class UtilTest(unittest.TestCase):

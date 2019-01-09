@@ -13,7 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-# import tensorflow as tf
 # TODO: Move this protobuf into this project so we don't depend on
 #  tf.core.framework
 from tensorflow.core.framework import variable_pb2
@@ -25,7 +24,7 @@ __all__ = [
   "Variable",
 ]
 
-from gde import graph
+from graph_def_editor import graph
 
 
 class Variable(object):

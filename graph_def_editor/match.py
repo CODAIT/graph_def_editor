@@ -21,10 +21,7 @@ from __future__ import print_function
 
 from six import string_types
 
-import tensorflow as tf
-
-from gde import node
-from gde import select
+from graph_def_editor import node, select
 
 __all__ = [
     "op_type",

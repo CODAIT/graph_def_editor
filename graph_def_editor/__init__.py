@@ -23,22 +23,22 @@ from __future__ import division
 from __future__ import print_function
 
 # pylint: disable=wildcard-import
-from gde.edit import *
-from gde.graph import *
-from gde.match import *
-from gde.node import *
-from gde.reroute import *
-from gde.select import *
-from gde.subgraph import *
-from gde.transform import *
-from gde.util import *
-from gde.variable import *
+from graph_def_editor.edit import *
+from graph_def_editor.graph import *
+from graph_def_editor.match import *
+from graph_def_editor.node import *
+from graph_def_editor.reroute import *
+from graph_def_editor.select import *
+from graph_def_editor.subgraph import *
+from graph_def_editor.transform import *
+from graph_def_editor.util import *
+from graph_def_editor.variable import *
 # pylint: enable=wildcard-import
 
 # some useful aliases
 # pylint: disable=g-bad-import-order
-from gde import subgraph as _subgraph
-from gde import util as _util
+from graph_def_editor import subgraph as _subgraph
+from graph_def_editor import util as _util
 # pylint: enable=g-bad-import-order
 ph = _util.make_placeholder_from_dtype_and_shape
 sgv = _subgraph.make_view

@@ -18,9 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import tensorflow as tf
-
-from gde import reroute, select, subgraph, util
+from graph_def_editor import reroute, select, subgraph, util
 
 
 __all__ = [

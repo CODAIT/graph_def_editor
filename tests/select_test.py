@@ -23,7 +23,7 @@ import re
 import tensorflow as tf
 import unittest
 
-import gde
+import graph_def_editor as gde
 
 
 class SelectTest(unittest.TestCase):
@@ -71,7 +71,7 @@ class SelectTest(unittest.TestCase):
     self.assertEqual(len(gde.filter_ops(self.graph, True)), 8)
     self.assertEqual(
         len(gde.filter_ops(self.graph,
-                           lambda op: op.op_type == "Const")), 3)
+                                        lambda op: op.op_type == "Const")), 3)
     self.assertEqual(
         len(gde.filter_ops(self.graph, lambda op: op.op_type == "Add")), 5)
     self.assertEqual(
@@ -173,7 +173,7 @@ class SelectTest(unittest.TestCase):
 
     within_ops = [self.a.op, self.c.op, self.d.op, self.f.op]
     ops = gde.get_walks_union_ops([self.a.op], [self.f.op],
-                                  within_ops=within_ops)
+                                               within_ops=within_ops)
     self.assertEqual(len(ops), 4)
     self.assertTrue(self.b.op not in ops)
 
@@ -181,7 +181,7 @@ class SelectTest(unittest.TestCase):
       return op in [self.a.op, self.c.op, self.f.op]
 
     ops = gde.get_walks_union_ops([self.a.op], [self.f.op],
-                                  within_ops_fn=within_ops_fn)
+                                               within_ops_fn=within_ops_fn)
     self.assertEqual(len(ops), 3)
     self.assertTrue(self.b.op not in ops)
     self.assertTrue(self.d.op not in ops)

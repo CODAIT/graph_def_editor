@@ -25,7 +25,7 @@ import numpy as np
 import tensorflow as tf
 import unittest
 
-import gde
+import graph_def_editor as gde
 
 # Precision tolerance for floating-point value tests.
 ERROR_TOLERANCE = 1e-3
@@ -120,8 +120,8 @@ class TransformTest(unittest.TestCase):
       #       op_.outputs[0],
       #       name="AddNoise")
       noise_op = gde.make_const(info.graph_, "Noise",
-                                np.full([10], 1., dtype=np.float32),
-                                uniquify_name=True)
+                                             np.full([10], 1., dtype=np.float32),
+                                             uniquify_name=True)
       add_noise_op = info.graph_.add_node("AddNoise", "Add", uniquify_name=True)
       add_noise_op.add_attr("T", tf.float32)
       add_noise_op.set_inputs([noise_op.outputs[0], op_.outputs[0]])
@@ -176,7 +176,7 @@ class TransformTest(unittest.TestCase):
     #   _ = tf.constant(10.0, shape=[10], name="Input")
     # New code adds node as a NodeDef
     ten_node = gde.make_const(self.graph, "Ten", np.full([10], 10.,
-                                                         dtype=np.float32))
+                                                                      dtype=np.float32))
 
     ten_tensor = ten_node.output(0)
     sgv, _ = gde.copy_with_input_replacements(
@@ -267,7 +267,7 @@ class TransformTest(unittest.TestCase):
       _ = tf.constant(2.0, name="d")
     g = gde.Graph(tmp_graph)
     res = gde.graph_replace([g["b"].output(0), g["c"].output(0)],
-                            {g["a"].output(0): g["d"].output(0)})
+                                         {g["a"].output(0): g["d"].output(0)})
     self.assertEqual(res[0].name, "b:0")
     self.assertEqual(res[1].name, "c_1:0")
 
@@ -287,7 +287,7 @@ class TransformTest(unittest.TestCase):
 
     # Should not raise exception.
     res = gde.graph_replace(g["grad"].output(0), replacement_ts,
-                            dst_scope="res")
+                                         dst_scope="res")
 
     self.assertNotEqual(res.name, g["grad"].output(0).name)
     after_graph = tf.Graph()

@@ -21,9 +21,7 @@ from __future__ import print_function
 import tensorflow as tf
 from typing import Tuple, Dict, FrozenSet, Iterable
 
-from gde import node
-from gde import util
-from gde import variable
+from graph_def_editor import node, util, variable
 
 __all__ = [
   "Graph",
@@ -98,7 +96,7 @@ class Graph(object):
         self.add_collection_from_collection_def(c)
 
   def add_node_from_node_def(self, node_def: tf.NodeDef,
-                             set_inputs: bool = False) -> node.Node:
+                             set_inputs: bool = False) -> 'node.Node':
     """
     Unpack a `tf.NodeDef` protobuf into a mutable `Node` object.'
 
@@ -133,7 +131,7 @@ class Graph(object):
                                                 skip_if_present=True)
       var.add_to_collection(collection_name)
 
-  def __getitem__(self, name: str) -> node.Node:
+  def __getitem__(self, name: str) -> 'node.Node':
     """
     Retrieve a node of the graph by name
 
@@ -157,7 +155,7 @@ class Graph(object):
     return name in self._node_name_to_node.keys()
 
   def add_node(self, name: str, op_name: str, uniquify_name: bool = False) -> \
-          node.Node:
+          'node.Node':
     """
     Add a new, empty node to the graph.
     Args:
@@ -186,7 +184,7 @@ class Graph(object):
 
   def add_node_from_node_def(self, node_def: tf.NodeDef,
                              set_inputs: bool = False,
-                             set_control_inputs: bool = False) -> node.Node:
+                             set_control_inputs: bool = False) -> 'node.Node':
     """
     Adds a new node to the graph, populating fields of the node from a
     `tf.NodeDef` protocol buffer.
@@ -218,7 +216,7 @@ class Graph(object):
     # Don't need to increment version counter; add_node() already did that.
     return ret
 
-  def add_variable(self, name: str):
+  def add_variable(self, name: str) -> variable.Variable:
     """
     Adds a new variable to the graph.
 
@@ -314,11 +312,11 @@ class Graph(object):
     return new_name
 
   @property
-  def node_names(self) -> Iterable[node.Node]:
+  def node_names(self) -> Iterable['node.Node']:
     return self._node_name_to_node.keys()
 
   @property
-  def nodes(self) -> Tuple[node.Node]:
+  def nodes(self) -> Tuple['node.Node']:
     """
     Returns:
       A list of all nodes, both immutable and mutable, present in the graph
@@ -441,7 +439,7 @@ class Graph(object):
     self._next_id = ret + 1
     return ret
 
-  def node_to_frame_names(self, n: node.Node) -> Tuple[str]:
+  def node_to_frame_names(self, n: 'node.Node') -> Tuple[str]:
     """
     Generates (or uses a cached copy of) a map from graph node to the name of
     the associated control flow frame(s).
@@ -495,7 +493,7 @@ class Graph(object):
       self._generate_node_to_frame_name()
     return self._node_to_frame_names[n]
 
-  def frame_name_to_nodes(self, frame_name: str) -> Tuple[node.Node]:
+  def frame_name_to_nodes(self, frame_name: str) -> Tuple['node.Node']:
     """
     Performs the inverse mapping of node_to_frame_name().
 
@@ -580,10 +578,10 @@ class Graph(object):
     }
 
   @property
-  def colocation_groups(self) -> Dict[str, FrozenSet[node.Node]]:
+  def colocation_groups(self) -> Dict[str, FrozenSet['node.Node']]:
     """
     Generate a table of all groups of nodes that must be on the same device
-    according to colocation constrains in the underlying NodeDefs.
+    according to collocation constrains in the underlying NodeDefs.
 
     Returns:
       A dictionary with one entry per group. Key is the name of the
@@ -598,7 +596,7 @@ class Graph(object):
         for head_name in n.colocation_groups:
           head_name_to_coloc_group.setdefault(head_name, set()).add(n)
       self._head_name_to_coloc_group = {
-        k: frozenset(v) for k, v in head_name_to_coloc_group.items() }
+        k: frozenset(v) for k, v in head_name_to_coloc_group.items()}
     return self._head_name_to_coloc_group
 
 

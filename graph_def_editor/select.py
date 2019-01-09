@@ -24,9 +24,9 @@ import re
 from six import iteritems
 from six import string_types
 
-from gde import util
-from gde.graph import Graph
-from gde.tensor import Tensor
+from graph_def_editor import util
+from graph_def_editor.graph import Graph
+from graph_def_editor.tensor import Tensor
 
 __all__ = [
     "can_be_regex",

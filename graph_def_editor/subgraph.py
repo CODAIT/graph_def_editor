@@ -24,10 +24,8 @@ import copy
 import six
 from six import iteritems
 from six import StringIO
-import tensorflow as tf
 
-from gde import select
-from gde import util
+from graph_def_editor import select, util
 
 __all__ = [
     "SubGraphView",
