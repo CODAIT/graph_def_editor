@@ -1,8 +1,10 @@
-# GraphDef Editor (gde)
+# GraphDef Editor
 ### A port of the old TensorFlow `contrib.graph_editor` that operates over serialized graphs
 
 TensorFlow versions prior to version 2.0 had a Python graph editor in
-`contrib.graph_editor`. This functionality was removed in TensorFlow 2.0.
+`contrib.graph_editor`. This functionality is slated to be removed in 
+TensorFlow 2.0, along with the rest of the `contrib` package (see the 
+[RFC](https://github.com/tensorflow/community/blob/master/rfcs/20180907-contrib-sunset.md).)
 This project brings back the graph editor as a standalone Python package.
 
 The original graph editor operated over TensorFlow's Python classes `Graph`,
@@ -10,10 +12,14 @@ The original graph editor operated over TensorFlow's Python classes `Graph`,
 As a result of this design, the graph editor needed to be updated whenever the
 underlying classes changed.
 
-Unlike the original graph editor, the GraphDef Editor operates over 
-*serialized* TensorFlow graphs. Although TensorFlow's serialization format is
-not (currently) a public API, this format changes much less frequently than the
-Python classes that the original graph editor depended on.
+The GraphDef Editor operates over *serialized* TensorFlow graphs represented as
+`GraphDef` protocol buffer messages. Although TensorFlow's serialization format 
+is technically not a public API, there is public 
+[documentation](https://www.tensorflow.org/guide/extend/model_files) 
+for its structure, and the format changes much less frequently than the Python 
+classes that the original graph editor depended on. TensorFlow's C++ 
+[Graph Transform Tool](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/tools/graph_transforms/README.md)
+also operates over serialized graphs.
 
 TODO: Example usage
 
