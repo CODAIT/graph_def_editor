@@ -21,16 +21,35 @@ TODO: Example usage
 
 **This project is a work in progress.**
 
-Current status: 16 of 50 original regression tests passing.
+Current status:
+
+* All of the original project's regression tests pass
+* Examples from the original project have not yet been ported
 
 ## Contents of root directory:
 
+* LICENSE: This project is released under an Apache v2 license
 * env: Not in git repo; create by running scripts/env.sh. Anaconda virtualenv
   for running tests and notebooks in this project.
 * notebooks: Jupyter notebooks.
 * gde: Source code for the Python package
 * scripts: Useful shell and Python scripts
 * tests: pytest tests. To run, create and activate
+
+## IDE setup instructions
+
+1. Install IntelliJ and the community Python plugin.
+2. Run the script `scripts/env.sh` to create an Anaconda enviroment under `env`.
+3. Import the root directory of this repository as a new project.
+   Use the Anaconda environment at `env/bin/python` as the Python for
+   the project.
+4. In the "Project" view of IntelliJ, right-click on `env` and select 
+   `Mark directory as ==> Excluded`. `env` shoud turn red.
+5. Configure your editor to use 2 spaces for indents. Disable the PEP8 warnings
+   in IntelliJ about indents not being a multiple of 4.
+6. To run tests from within IntelliJ, open up the `Terminal` pane and type
+   `./scripts/test.sh`. The outputs of the test run will be teed to the file
+   `test.out` at the root of the project.
 
 
 
