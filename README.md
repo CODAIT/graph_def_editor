@@ -4,7 +4,7 @@
 TensorFlow versions prior to version 2.0 had a Python graph editor in
 `contrib.graph_editor`. This functionality is slated to be removed in 
 TensorFlow 2.0, along with the rest of the `contrib` package (see the 
-[RFC](https://github.com/tensorflow/community/blob/master/rfcs/20180907-contrib-sunset.md).)
+[RFC](https://github.com/tensorflow/community/blob/master/rfcs/20180907-contrib-sunset.md)).
 This project brings back the graph editor as a standalone Python package.
 
 The original graph editor operated over TensorFlow's Python classes `Graph`,
