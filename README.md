@@ -38,7 +38,7 @@ Current status:
 * env: Not in git repo; create by running scripts/env.sh. Anaconda virtualenv
   for running tests and notebooks in this project.
 * notebooks: Jupyter notebooks.
-* gde: Source code for the Python package
+* graph\_def\_editor: Source code for the Python package
 * scripts: Useful shell and Python scripts
 * tests: pytest tests. To run, create and activate
 
