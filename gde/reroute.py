@@ -474,10 +474,7 @@ def remove_control_inputs(op, cops):
       raise ValueError("{} is not a control_input of {}".format(op.name,
                                                                 cop.name))
   control_inputs = [cop for cop in op.control_inputs if cop not in cops]
-  # pylint: disable=protected-access
-  op._remove_all_control_inputs()
-  op._add_control_inputs(control_inputs)
-  # pylint: enable=protected-access
+  op.set_control_inputs(control_inputs)
 
 
 def add_control_inputs(op, cops):

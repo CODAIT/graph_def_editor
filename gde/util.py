@@ -43,6 +43,7 @@ __all__ = [
   "make_placeholder_from_dtype_and_shape",
   "load_variables_to_tf_graph",
   "make_const",
+  "make_placeholder",
 ]
 
 
@@ -101,6 +102,9 @@ class ListView(object):
     if not isinstance(other, list):
       other = list(other)
     return list(self) + other
+
+  def __str__(self):
+    return "ListView[{}]".format(self._list)
 
 
 # TODO(fkp): very generic code, it should be moved in a more generic place.
@@ -355,12 +359,12 @@ class ControlOutputs(object):
   def _build(self):
     """Build the control outputs dictionary."""
     self._control_outputs.clear()
-    for node in self._graph.nodes:
-      for control_input in node.control_inputs:
+    for n in self._graph.nodes:
+      for control_input in n.control_inputs:
         if control_input not in self._control_outputs:
           self._control_outputs[control_input] = []
-        if node not in self._control_outputs[control_input]:
-          self._control_outputs[control_input].append(node)
+        if n not in self._control_outputs[control_input]:
+          self._control_outputs[control_input].append(n)
     self._version = self._graph.version
 
   def get_all(self):
@@ -436,28 +440,6 @@ def placeholder_name(t=None, scope=None, prefix=_DEFAULT_PLACEHOLDER_PREFIX):
     return "{}{}".format(scope, prefix)
 
 
-def _make_placeholder(g: 'g.Graph',
-                      dtype: tf.DType,
-                      shape,
-                      name: str):
-  """Shared code for make_placeholder*() functions.
-
-  Args:
-    g: Surrogate object for the graph into which the placeholder should
-      be placed.
-    name: Name for the op to create
-    dtype: Data type for the placeholder
-    shape: Shape of the placeholder's output (exact type TBD)
-
-  Returns:
-     newly created mutable Node that wraps the placholder op.
-  """
-  ret = g.add_node(name, op_name="Placeholder")
-  ret.add_attr("dtype", dtype)
-  ret.add_attr("shape", tf.TensorShape(shape))
-  return ret
-
-
 def make_placeholder_from_tensor(g: 'graph.Graph', t: tensor.Tensor, scope=None,
                                  prefix=_DEFAULT_PLACEHOLDER_PREFIX):
   """Create a `gde.Node` representing a `tf.placeholder` for the Graph Editor.
@@ -475,9 +457,9 @@ def make_placeholder_from_tensor(g: 'graph.Graph', t: tensor.Tensor, scope=None,
   Raises:
     TypeError: if `t` is not `None` or a `tf.Tensor`.
   """
-  return _make_placeholder(g, dtype=t.dtype, shape=t.shape,
-                           name=placeholder_name(t, scope=scope,
-                                                 prefix=prefix))
+  return make_placeholder(g, dtype=t.dtype, shape=t.shape,
+                          name=placeholder_name(t, scope=scope,
+                                                prefix=prefix))
 
 
 def make_placeholder_from_dtype_and_shape(g, dtype, shape=None, scope=None,
@@ -498,9 +480,9 @@ def make_placeholder_from_dtype_and_shape(g, dtype, shape=None, scope=None,
   Returns:
     A newly created tf.placeholder.
   """
-  return _make_placeholder(g,
-                           dtype=dtype, shape=shape,
-                           name=placeholder_name(scope=scope, prefix=prefix))
+  return make_placeholder(g,
+                          dtype=dtype, shape=shape,
+                          name=placeholder_name(scope=scope, prefix=prefix))
 
 
 _INTERNAL_VARIABLE_RE = re.compile(r"^__\w+__$")
@@ -708,7 +690,7 @@ def load_variables_to_tf_graph(g: 'graph.Graph'):
 def make_const(g: 'graph.Graph', name: str, value: np.ndarray,
                uniquify_name: bool = False):
   """
-  Convenience method to add a `Const` op to a gde.Graph.
+  Convenience method to add a `Const` op to a `gde.Graph`.
 
   Args:
     g: The graph that the node should be added to
@@ -718,11 +700,34 @@ def make_const(g: 'graph.Graph', name: str, value: np.ndarray,
       suffix in the event of a name collision. Otherwise name collisions
       result in an error.
 
-  Returns pge.Node object representing the new node.
+  Returns `gde.Node` object representing the new node.
   """
   dtype = tf.as_dtype(value.dtype)
   ret = g.add_node(name, "Const", uniquify_name=uniquify_name)
   ret.add_attr("dtype", dtype)
   ret.add_attr("value", value)
   ret.set_outputs_from_pairs([(dtype, tf.TensorShape(value.shape))])
+  return ret
+
+
+def make_placeholder(g: 'graph.Graph', name: str, dtype: tf.DType,
+                     shape: tf.TensorShape,
+                     uniquify_name: bool = False):
+  """
+  Convenience method to add a `Placeholder` op to a `gde.Graph`.
+
+  Args:
+    g: The graph that the new node should be added to
+    name: Name for the new node
+    dtype: `tf.DType` holding the dtype of the placeholder
+    shape: `tf.TensorShape` representing the shape returned by the placeholder
+    uniquify_name: if True, generate unique names by appending a numeric
+      suffix in the event of a name collision. Otherwise name collisions
+      result in an error.
+
+  Returns `gde.Node` object representing the new node.
+  """
+  ret = g.add_node(name, "Placeholder", uniquify_name=uniquify_name)
+  ret.add_attr("dtype", dtype)
+  ret.set_outputs_from_pairs([(dtype, shape)])
   return ret

@@ -119,7 +119,8 @@ class TransformTest(unittest.TestCase):
       #       constant_op.constant(1.0, shape=[10], name="Noise"),
       #       op_.outputs[0],
       #       name="AddNoise")
-      noise_op = gde.make_const(info.graph_, "Noise", np.repeat(1., 10),
+      noise_op = gde.make_const(info.graph_, "Noise",
+                                np.full([10], 1., dtype=np.float32),
                                 uniquify_name=True)
       add_noise_op = info.graph_.add_node("AddNoise", "Add", uniquify_name=True)
       add_noise_op.add_attr("T", tf.float32)
@@ -174,7 +175,8 @@ class TransformTest(unittest.TestCase):
     # with self.graph.as_default():
     #   _ = tf.constant(10.0, shape=[10], name="Input")
     # New code adds node as a NodeDef
-    ten_node = gde.make_const(self.graph, "Ten", np.full([10], 10.))
+    ten_node = gde.make_const(self.graph, "Ten", np.full([10], 10.,
+                                                         dtype=np.float32))
 
     ten_tensor = ten_node.output(0)
     sgv, _ = gde.copy_with_input_replacements(

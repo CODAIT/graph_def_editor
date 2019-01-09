@@ -57,7 +57,8 @@ class RerouteTest(unittest.TestCase):
     # with self.graph.as_default():
     #   a3 = constant_op.constant(3.0, shape=[2], name="a3")
     # New code adds a NodeDef to the graph:
-    a3_node = gde.make_const(self.graph, "a3", np.full([2], 3.0))
+    a3_node = gde.make_const(self.graph, "a3", np.full([2], 3.0,
+                                                       dtype=np.float32))
 
     gde.swap_ios(gde.sgv(a3_node).remap_outputs([0, 0]),
                  gde.sgv(self.a0.op, self.a1.op))

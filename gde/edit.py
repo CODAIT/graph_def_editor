@@ -18,11 +18,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from tensorflow.contrib.graph_editor import reroute
-from tensorflow.contrib.graph_editor import select
-from tensorflow.contrib.graph_editor import subgraph
-from tensorflow.contrib.graph_editor import util
-from tensorflow.python.ops import array_ops as tf_array_ops
+import tensorflow as tf
+
+from gde import reroute, select, subgraph, util
+
 
 __all__ = [
     "detach_control_inputs",
@@ -85,12 +84,19 @@ def detach_inputs(sgv, control_inputs=False):
   """
   sgv = subgraph.make_view(sgv)
 
-  with sgv.graph.as_default():
-    input_placeholders = [
-        tf_array_ops.placeholder(
-            dtype=input_t.dtype, name=util.placeholder_name(input_t))
-        for input_t in sgv.inputs
-    ]
+  # Old code:
+  # with sgv.graph.as_default():
+  #   input_placeholders = [
+  #       tf.placeholder(
+  #           dtype=input_t.dtype, name=util.placeholder_name(input_t))
+  #       for input_t in sgv.inputs
+  #   ]
+  # New code:
+  input_placeholders = [
+    util.make_placeholder(sgv.graph, util.placeholder_name(input_t),
+                          input_t.dtype, input_t.shape).output(0)
+    for input_t in sgv.inputs
+  ]
 
   reroute.swap_inputs(sgv, input_placeholders)
   if control_inputs:
@@ -126,11 +132,17 @@ def detach_outputs(sgv, control_outputs=None):
       [input_id for input_id, input_t in enumerate(consumers_sgv.inputs)
        if input_t in sgv_.outputs])
 
-  with sgv_.graph.as_default():
-    output_placeholders = [
-        util.make_placeholder_from_tensor(input_t)
-        for input_t in consumers_sgv.inputs
-    ]
+  # Old code:
+  # with sgv_.graph.as_default():
+  #   output_placeholders = [
+  #       util.make_placeholder_from_tensor(input_t)
+  #       for input_t in consumers_sgv.inputs
+  #   ]
+  # New code:
+  output_placeholders = [
+    util.make_placeholder_from_tensor(consumers_sgv.graph, input_t).output(0)
+    for input_t in consumers_sgv.inputs
+  ]
 
   reroute.swap_outputs(sgv_, output_placeholders)
   if control_outputs is not None:

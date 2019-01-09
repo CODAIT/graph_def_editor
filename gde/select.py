@@ -24,9 +24,9 @@ import re
 from six import iteritems
 from six import string_types
 
+from gde import util
 from gde.graph import Graph
 from gde.tensor import Tensor
-from gde import util
 
 __all__ = [
     "can_be_regex",
@@ -226,7 +226,7 @@ def check_cios(control_inputs=False, control_outputs=None, control_ios=None):
   """
   if control_ios is not None:
     if not isinstance(control_ios, util.ControlOutputs):
-      raise TypeError("Expected a util.ControlOutputs, got: {}".format(
+      raise TypeError("Expected a gde.ControlOutputs, got: {}".format(
           type(control_ios)))
     if control_outputs is not None:
       raise ValueError("control_outputs should be None when using control_ios.")
@@ -234,7 +234,7 @@ def check_cios(control_inputs=False, control_outputs=None, control_ios=None):
     control_outputs = control_ios
   elif control_outputs is not None:
     if not isinstance(control_outputs, util.ControlOutputs):
-      raise TypeError("Expected a util.ControlOutputs, got: {}".format(
+      raise TypeError("Expected a gde.ControlOutputs, got: {}".format(
           type(control_outputs)))
 
   if control_outputs is not None:

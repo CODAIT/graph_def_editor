@@ -67,7 +67,7 @@ class Tensor(object):
     return self._index
 
   @property
-  def dtype(self):
+  def dtype(self) -> tf.DType:
     return self._dtype
 
   @property
