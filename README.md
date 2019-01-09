@@ -1,5 +1,5 @@
 # GraphDef Editor
-### A port of the old TensorFlow `contrib.graph_editor` that operates over serialized graphs
+### A port of the TensorFlow `contrib.graph_editor` package that operates over serialized graphs
 
 TensorFlow versions prior to version 2.0 had a Python graph editor in
 `contrib.graph_editor`. This functionality is slated to be removed in 
@@ -45,8 +45,9 @@ Current status:
   where `script_name.py` is the name of the example script.
 * notebooks: Jupyter notebooks.
 * graph\_def\_editor: Source code for the Python package
-* scripts: Useful shell and Python scripts
-* tests: pytest tests. To run, create and activate
+* scripts: Useful shell scripts for development.
+* tests: pytest tests. To run these tests, create `env` and run
+  `scripts/test.sh`
 
 ## IDE setup instructions
 
