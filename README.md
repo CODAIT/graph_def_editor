@@ -35,8 +35,14 @@ Current status:
 ## Contents of root directory:
 
 * LICENSE: This project is released under an Apache v2 license
-* env: Not in git repo; create by running scripts/env.sh. Anaconda virtualenv
+* env: Not in git repo; create by running `scripts/env.sh`. Anaconda virtualenv
   for running tests and notebooks in this project.
+* examples: Example scripts.  To run these scripts from the root directory use,
+  the command 
+  ```
+  PYTHONPATH=$PWD env/bin/python examples/script_name.py
+  ```
+  where `script_name.py` is the name of the example script.
 * notebooks: Jupyter notebooks.
 * graph\_def\_editor: Source code for the Python package
 * scripts: Useful shell and Python scripts
