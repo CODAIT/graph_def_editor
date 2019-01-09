@@ -18,9 +18,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import numpy as np
 import tensorflow as tf
 import unittest
-
 
 import gde
 
@@ -33,49 +33,66 @@ class EditTest(unittest.TestCase):
   - then make sure it has the expected topology using the graph matcher.
   """
 
+  # TODO(frreiss): Merge duplicate setup code across test cases
   def setUp(self):
-    self.graph = ops.Graph()
-    with self.graph.as_default():
-      self.a = constant_op.constant([1., 1.], shape=[2], name="a")
-      with ops.name_scope("foo"):
-        self.b = constant_op.constant([2., 2.], shape=[2], name="b")
-        self.c = math_ops.add(self.a, self.b, name="c")
-        self.d = constant_op.constant([3., 3.], shape=[2], name="d")
-        with ops.name_scope("bar"):
-          self.e = math_ops.add(self.c, self.d, name="e")
-          self.f = math_ops.add(self.c, self.d, name="f")
-          self.g = math_ops.add(self.c, self.a, name="g")
-          with ops.control_dependencies([self.c.op]):
-            self.h = math_ops.add(self.f, self.g, name="h")
+    tf_graph = tf.Graph()
+    with tf_graph.as_default():
+      a = tf.constant([1., 1.], shape=[2], name="a")
+      with tf.name_scope("foo"):
+        b = tf.constant([2., 2.], shape=[2], name="b")
+        c = tf.add(a, b, name="c")
+        d = tf.constant([3., 3.], shape=[2], name="d")
+        with tf.name_scope("bar"):
+          e = tf.add(c, d, name="e")
+          f = tf.add(c, d, name="f")
+          g = tf.add(c, a, name="g")
+          with tf.control_dependencies([c.op]):
+            h = tf.add(f, g, name="h")
+    self.graph = gde.Graph(tf_graph)
+    self.a = self.graph.get_tensor_by_name(a.name)
+    self.b = self.graph.get_tensor_by_name(b.name)
+    self.c = self.graph.get_tensor_by_name(c.name)
+    self.d = self.graph.get_tensor_by_name(d.name)
+    self.e = self.graph.get_tensor_by_name(e.name)
+    self.f = self.graph.get_tensor_by_name(f.name)
+    self.g = self.graph.get_tensor_by_name(g.name)
+    self.h = self.graph.get_tensor_by_name(h.name)
 
   def test_detach(self):
     """Test for ge.detach."""
-    sgv = ge.sgv(self.c.op, self.a.op)
-    control_outputs = ge.ControlOutputs(self.graph)
-    ge.detach(sgv, control_ios=control_outputs)
+    sgv = gde.sgv(self.c.op, self.a.op)
+    control_outputs = gde.ControlOutputs(self.graph)
+    gde.detach(sgv, control_ios=control_outputs)
     # make sure the detached graph is as expected.
     self.assertTrue(
-        match.OpMatcher("^foo/c$").input_ops("a", "geph__b_0")(self.c.op))
+        gde.OpMatcher("^foo/c$").input_ops("a", "geph__b_0")(self.c.op))
 
   def test_connect(self):
-    """Test for ge.connect."""
-    with self.graph.as_default():
-      x = constant_op.constant([1., 1.], shape=[2], name="x")
-      y = constant_op.constant([2., 2.], shape=[2], name="y")
-      z = math_ops.add(x, y, name="z")
+    """Test for gde.connect."""
+    # Original code:
+    # with self.graph.as_default():
+    #   x = constant_op.constant([1., 1.], shape=[2], name="x")
+    #   y = constant_op.constant([2., 2.], shape=[2], name="y")
+    #   z = math_ops.add(x, y, name="z")
+    x = gde.make_const(self.graph, "x", np.array([1., 1.]))
+    y = gde.make_const(self.graph, "y", np.array([2., 2.]))
+    z = self.graph.add_node("z", "Add")
+    z.add_attr("T", tf.float32)
+    z.set_inputs([x.outputs[0], y.outputs[0]])
+    z.infer_outputs()
 
-    sgv = ge.sgv(x.op, y.op, z.op)
-    ge.connect(sgv, ge.sgv(self.e.op).remap_inputs([0]))
+    sgv = gde.sgv(x, y, z)
+    gde.connect(sgv, gde.sgv(self.e.op).remap_inputs([0]))
     self.assertTrue(
-        match.OpMatcher("^foo/bar/e$").input_ops("^z$", "foo/d$")(self.e.op))
+        gde.OpMatcher("^foo/bar/e$").input_ops("^z$", "foo/d$")(self.e.op))
 
   def test_bypass(self):
     """Test for ge.bypass."""
-    ge.bypass(ge.sgv(self.f.op).remap_inputs([0]))
+    gde.bypass(gde.sgv(self.f.op).remap_inputs([0]))
     self.assertTrue(
-        match.OpMatcher("^foo/bar/h$").input_ops("^foo/c$", "foo/bar/g$")(
+        gde.OpMatcher("^foo/bar/h$").input_ops("^foo/c$", "foo/bar/g$")(
             self.h.op))
 
 
 if __name__ == "__main__":
-  test.main()
+  unittest.main()

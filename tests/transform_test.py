@@ -119,10 +119,8 @@ class TransformTest(unittest.TestCase):
       #       constant_op.constant(1.0, shape=[10], name="Noise"),
       #       op_.outputs[0],
       #       name="AddNoise")
-      noise_op = info.graph_.add_node("Noise", "Const", uniquify_name=True)
-      noise_op.add_attr("dtype", tf.float32)
-      noise_op.add_attr("value", np.repeat(1., 10))
-      noise_op.infer_outputs()
+      noise_op = gde.make_const(info.graph_, "Noise", np.repeat(1., 10),
+                                uniquify_name=True)
       add_noise_op = info.graph_.add_node("AddNoise", "Add", uniquify_name=True)
       add_noise_op.add_attr("T", tf.float32)
       add_noise_op.set_inputs([noise_op.outputs[0], op_.outputs[0]])
@@ -172,15 +170,11 @@ class TransformTest(unittest.TestCase):
       self.assertEqual(op.get_attr("_bar"), "bar")
 
   def test_copy_with_input_replacements(self):
-
     # Original code:
     # with self.graph.as_default():
     #   _ = tf.constant(10.0, shape=[10], name="Input")
     # New code adds node as a NodeDef
-    ten_node = self.graph.add_node("Ten", "Const", uniquify_name=False)
-    ten_node.set_outputs_from_pairs([(tf.float32, [10])])
-    ten_node.add_attr("dtype", tf.float32)
-    ten_node.add_attr("value", np.full([10], 10.0, dtype=np.float32))
+    ten_node = gde.make_const(self.graph, "Ten", np.full([10], 10.))
 
     ten_tensor = ten_node.output(0)
     sgv, _ = gde.copy_with_input_replacements(

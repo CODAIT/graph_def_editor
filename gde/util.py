@@ -42,6 +42,7 @@ __all__ = [
   "make_placeholder_from_tensor",
   "make_placeholder_from_dtype_and_shape",
   "load_variables_to_tf_graph",
+  "make_const",
 ]
 
 
@@ -703,3 +704,25 @@ def load_variables_to_tf_graph(g: 'graph.Graph'):
     tf_var = tf.Variable.from_proto(var.to_proto())
     tf.add_to_collections(var.collection_names, tf_var)
 
+
+def make_const(g: 'graph.Graph', name: str, value: np.ndarray,
+               uniquify_name: bool = False):
+  """
+  Convenience method to add a `Const` op to a gde.Graph.
+
+  Args:
+    g: The graph that the node should be added to
+    name: Name for the new `Const` node
+    value: Value to use for the constant
+    uniquify_name: if True, generate unique names by appending a numeric
+      suffix in the event of a name collision. Otherwise name collisions
+      result in an error.
+
+  Returns pge.Node object representing the new node.
+  """
+  dtype = tf.as_dtype(value.dtype)
+  ret = g.add_node(name, "Const", uniquify_name=uniquify_name)
+  ret.add_attr("dtype", dtype)
+  ret.add_attr("value", value)
+  ret.set_outputs_from_pairs([(dtype, tf.TensorShape(value.shape))])
+  return ret

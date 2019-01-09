@@ -430,7 +430,7 @@ def get_forward_walk_ops(seed_ops,
 
   def is_within(operator):
     return (within_ops is None or operator in within_ops) and (
-        within_ops_fn is None or within_ops_fn(op))
+        within_ops_fn is None or within_ops_fn(operator))
 
   result = list(seed_ops)
   wave = set(seed_ops)
@@ -500,7 +500,7 @@ def get_backward_walk_ops(seed_ops,
 
   def is_within(operator):
     return (within_ops is None or operator in within_ops) and (
-        within_ops_fn is None or within_ops_fn(op))
+        within_ops_fn is None or within_ops_fn(operator))
 
   result = list(seed_ops)
   wave = set(seed_ops)

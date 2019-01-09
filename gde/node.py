@@ -463,8 +463,9 @@ class Node(object):
     """
     self._control_inputs = list(new_control_inputs)
 
-  def set_outputs_from_pairs(self, new_outputs: Iterable[Tuple[tf.DType,
-                                                               tf.shape]]):
+  def set_outputs_from_pairs(self,
+                             new_outputs: Iterable[Tuple[tf.DType,
+                                                         tf.TensorShape]]):
     """
     Set all outputs at once, removing anything that was there previously.
 
@@ -513,6 +514,8 @@ class Node(object):
       # set_outputs_from_pairs() increments the version counter, so we don't
       # need to. Also, we haven't added edges to the graph until these
       # outputs are connected to another node's inputs.
+
+      # TODO(frreiss): If this op has a "T" attribute, set that too.
 
   def set_inputs_from_strings(self, new_inputs: Iterable[str],
                               set_control_inputs: bool = True):

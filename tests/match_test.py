@@ -27,38 +27,41 @@ import gde
 class MatchTest(unittest.TestCase):
 
   def setUp(self):
-    self.graph = ops.Graph()
-    with self.graph.as_default():
-      self.a = constant_op.constant([1., 1.], shape=[2], name="a")
-      with ops.name_scope("foo"):
-        self.b = constant_op.constant([2., 2.], shape=[2], name="b")
-        self.c = math_ops.add(self.a, self.b, name="c")
-        self.d = constant_op.constant([3., 3.], shape=[2], name="d")
-        with ops.name_scope("bar"):
-          self.e = math_ops.add(self.c, self.d, name="e")
-          self.f = math_ops.add(self.c, self.d, name="f")
-          self.g = math_ops.add(self.c, self.a, name="g")
-          with ops.control_dependencies([self.c.op]):
-            self.h = math_ops.add(self.f, self.g, name="h")
+    tf_graph = tf.Graph()
+    with tf_graph.as_default():
+      a = tf.constant([1., 1.], shape=[2], name="a")
+      with tf.name_scope("foo"):
+        b = tf.constant([2., 2.], shape=[2], name="b")
+        c = tf.add(a, b, name="c")
+        d = tf.constant([3., 3.], shape=[2], name="d")
+        with tf.name_scope("bar"):
+          _ = tf.add(c, d, name="e")
+          f = tf.add(c, d, name="f")
+          g = tf.add(c, a, name="g")
+          with tf.control_dependencies([c.op]):
+            _ = tf.add(f, g, name="h")
+
+    self.graph = gde.Graph(tf_graph)
+    self.f_op = self.graph[f.op.name]
 
   def test_simple_match(self):
-    self.assertTrue(match.OpMatcher("^.*/f$")(self.f.op))
+    self.assertTrue(gde.OpMatcher("^.*/f$")(self.f_op))
     self.assertTrue(
-        match.OpMatcher("^.*/f$").input_ops("^.*/c$", "^.*/d$")(self.f.op))
+        gde.OpMatcher("^.*/f$").input_ops("^.*/c$", "^.*/d$")(self.f_op))
     self.assertTrue(
-        match.OpMatcher("^.*/f$").input_ops(True, "^.*/d$")(self.f.op))
+        gde.OpMatcher("^.*/f$").input_ops(True, "^.*/d$")(self.f_op))
     self.assertTrue(
-        match.OpMatcher("^.*/f$").input_ops(
-            match.op_type("Add"), match.op_type("Const"))(self.f.op))
+        gde.OpMatcher("^.*/f$").input_ops(
+            gde.op_type("Add"), gde.op_type("Const"))(self.f_op))
     self.assertTrue(
-        match.OpMatcher("^.*/f$").input_ops("^.*/c$", "^.*/d$")
-        .output_ops(match.OpMatcher("^.*/h$")
-                    .control_input_ops("^.*/c$"))(self.f.op))
+        gde.OpMatcher("^.*/f$").input_ops("^.*/c$", "^.*/d$")
+        .output_ops(gde.OpMatcher("^.*/h$")
+                    .control_input_ops("^.*/c$"))(self.f_op))
     self.assertTrue(
-        match.OpMatcher("^.*/f$").input_ops("^.*/c$", "^.*/d$").output_ops(
-            match.OpMatcher("^.*/h$").control_input_ops("^.*/c$")
-            .output_ops([]))(self.f.op))
+        gde.OpMatcher("^.*/f$").input_ops("^.*/c$", "^.*/d$").output_ops(
+            gde.OpMatcher("^.*/h$").control_input_ops("^.*/c$")
+            .output_ops([]))(self.f_op))
 
 
 if __name__ == "__main__":
-  test.main()
+  unittest.main()

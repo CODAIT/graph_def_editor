@@ -26,6 +26,7 @@ import gde
 
 class SubgraphTest(unittest.TestCase):
 
+  # TODO(frreiss): Merge duplicate setup code across test cases
   def setUp(self):
     tf_graph = tf.Graph()
     with tf_graph.as_default():

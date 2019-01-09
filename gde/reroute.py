@@ -18,11 +18,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from tensorflow.contrib.graph_editor import subgraph as _subgraph
-from tensorflow.contrib.graph_editor import util as _util
-from tensorflow.python.framework import ops as _tf_ops
+import tensorflow as tf
 
-from tensorflow.python.util.all_util import remove_undocumented
+from gde import graph
+from gde import node
+from gde import tensor
+from gde import util
+from gde import subgraph
 
 _allowed_symbols = [
     "swap_ts",
@@ -39,17 +41,17 @@ _allowed_symbols = [
 
 
 def _check_ts_compatibility(ts0, ts1):
-  """Make sure the shape and dtype of the two tensor's lists are compatible.
+  """Make sure the shape and dtype of two lists of tensors are compatible.
 
   Args:
-    ts0: an object convertible to a list of `tf.Tensor`.
-    ts1: an object convertible to a list of `tf.Tensor`.
+    ts0: an object convertible to a list of `gde.Tensor`.
+    ts1: an object convertible to a list of `gde.Tensor`.
   Raises:
     ValueError: if any pair of tensors (same index in ts0 and ts1) have
       a dtype or a shape which is not compatible.
   """
-  ts0 = _util.make_list_of_t(ts0)
-  ts1 = _util.make_list_of_t(ts1)
+  ts0 = util.make_list_of_t(ts0)
+  ts1 = util.make_list_of_t(ts1)
   if len(ts0) != len(ts1):
     raise ValueError("ts0 and ts1 have different sizes: {} != {}".format(
         len(ts0), len(ts1)))
@@ -60,7 +62,7 @@ def _check_ts_compatibility(ts0, ts1):
       raise ValueError("Dtypes {} and {} are not compatible.".format(dtype0,
                                                                      dtype1))
     # check shape
-    shape0, shape1 = t0.get_shape(), t1.get_shape()
+    shape0, shape1 = t0.shape, t1.shape
     if not shape0.is_compatible_with(shape1):
       raise ValueError("Shapes {} and {} are not compatible.".format(shape0,
                                                                      shape1))
@@ -127,7 +129,7 @@ def _reroute_t(t0, t1, consumers1, can_modify=None, cannot_modify=None):
                                      if t is t1]
   for consumer1 in consumers1:
     for i in consumers1_indices[consumer1]:
-      consumer1._update_input(i, t0)  # pylint: disable=protected-access
+      consumer1.replace_input(i, t0)
       nb_update_inputs += 1
   return nb_update_inputs
 
@@ -178,13 +180,13 @@ def _reroute_ts(ts0, ts1, mode, can_modify=None, cannot_modify=None):
       converted to a list of `tf.Operation`.
   """
   a2b, b2a = _RerouteMode.check(mode)
-  ts0 = _util.make_list_of_t(ts0)
-  ts1 = _util.make_list_of_t(ts1)
+  ts0 = util.make_list_of_t(ts0)
+  ts1 = util.make_list_of_t(ts1)
   _check_ts_compatibility(ts0, ts1)
   if cannot_modify is not None:
-    cannot_modify = frozenset(_util.make_list_of_op(cannot_modify))
+    cannot_modify = frozenset(util.make_list_of_op(cannot_modify))
   if can_modify is not None:
-    can_modify = frozenset(_util.make_list_of_op(can_modify))
+    can_modify = frozenset(util.make_list_of_op(can_modify))
   nb_update_inputs = 0
   precomputed_consumers = []
   # precompute consumers to avoid issue with repeated tensors:
@@ -270,11 +272,11 @@ def _reroute_sgv_remap(sgv0, sgv1, mode):
     ValueError: if sgv0 and sgv1 do not belong to the same graph.
   """
   a2b, b2a = _RerouteMode.check(mode)
-  if not isinstance(sgv0, _subgraph.SubGraphView):
+  if not isinstance(sgv0, subgraph.SubGraphView):
     raise TypeError("Expected a SubGraphView, got {}".format(type(sgv0)))
-  if not isinstance(sgv1, _subgraph.SubGraphView):
+  if not isinstance(sgv1, subgraph.SubGraphView):
     raise TypeError("Expected a SubGraphView, got {}".format(type(sgv1)))
-  _util.check_graphs(sgv0, sgv1)
+  util.check_graphs(sgv0, sgv1)
   sgv0_ = sgv0.copy()
   sgv1_ = sgv1.copy()
   # pylint: disable=protected-access
@@ -329,13 +331,13 @@ def _reroute_sgv_inputs(sgv0, sgv1, mode):
     StandardError: if sgv0 or sgv1 cannot be converted to a SubGraphView using
       the same rules than the function subgraph.make_view.
   """
-  sgv0 = _subgraph.make_view(sgv0)
-  sgv1 = _subgraph.make_view(sgv1)
-  _util.check_graphs(sgv0, sgv1)
+  sgv0 = subgraph.make_view(sgv0)
+  sgv1 = subgraph.make_view(sgv1)
+  util.check_graphs(sgv0, sgv1)
   can_modify = sgv0.ops + sgv1.ops
   # also allow consumers of passthrough to be modified:
-  can_modify += _util.get_consuming_ops(sgv0.passthroughs)
-  can_modify += _util.get_consuming_ops(sgv1.passthroughs)
+  can_modify += util.get_consuming_ops(sgv0.passthroughs)
+  can_modify += util.get_consuming_ops(sgv1.passthroughs)
   _reroute_ts(sgv0.inputs, sgv1.inputs, mode, can_modify=can_modify)
   _reroute_sgv_remap(sgv0, sgv1, mode)
   return sgv0, sgv1
@@ -359,9 +361,9 @@ def _reroute_sgv_outputs(sgv0, sgv1, mode):
     StandardError: if sgv0 or sgv1 cannot be converted to a SubGraphView using
       the same rules than the function subgraph.make_view.
   """
-  sgv0 = _subgraph.make_view(sgv0)
-  sgv1 = _subgraph.make_view(sgv1)
-  _util.check_graphs(sgv0, sgv1)
+  sgv0 = subgraph.make_view(sgv0)
+  sgv1 = subgraph.make_view(sgv1)
+  util.check_graphs(sgv0, sgv1)
   cannot_modify = sgv0.ops + sgv1.ops
   _reroute_ts(sgv0.outputs, sgv1.outputs, mode, cannot_modify=cannot_modify)
   return sgv0, sgv1
@@ -464,9 +466,9 @@ def remove_control_inputs(op, cops):
     TypeError: if op is not a `tf.Operation`.
     ValueError: if any cop in cops is not a control input of op.
   """
-  if not isinstance(op, _tf_ops.Operation):
-    raise TypeError("Expected a tf.Operation, got: {}", type(op))
-  cops = _util.make_list_of_op(cops, allow_graph=False)
+  if not isinstance(op, node.Node):
+    raise TypeError("Expected a gde.Node, got: {}", type(op))
+  cops = util.make_list_of_op(cops, allow_graph=False)
   for cop in cops:
     if cop not in op.control_inputs:
       raise ValueError("{} is not a control_input of {}".format(op.name,
@@ -490,13 +492,13 @@ def add_control_inputs(op, cops):
     TypeError: if op is not a tf.Operation
     ValueError: if any cop in cops is already a control input of op.
   """
-  if not isinstance(op, _tf_ops.Operation):
-    raise TypeError("Expected a tf.Operation, got: {}", type(op))
-  cops = _util.make_list_of_op(cops, allow_graph=False)
+  if not isinstance(op, node.Node):
+    raise TypeError("Expected a gde.Node, got: {}", type(op))
+  cops = util.make_list_of_op(cops, allow_graph=False)
   for cop in cops:
     if cop in op.control_inputs:
       raise ValueError("{} is already a control_input of {}".format(cop.name,
                                                                     op.name))
   op._add_control_inputs(cops)  # pylint: disable=protected-access
 
-remove_undocumented(__name__, _allowed_symbols)
+
