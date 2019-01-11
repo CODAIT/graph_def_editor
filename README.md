@@ -23,6 +23,7 @@ also operates over serialized graphs.
 
 Example usage:
 ```python
+import numpy as np
 import tensorflow as tf
 import graph_def_editor as gde
 # Create a graph
@@ -44,12 +45,19 @@ g = gde.Graph(tf_g.as_graph_def())
 b = gde.make_const(g, "b", np.full([2, 3], 2.0, dtype=np.float32))
 gde.swap_inputs(g[c.op.name], [g[a.name], b.output(0)])
 
-# Reconstitute the modified serialized graph as TensorFlow graph...
+# Reconstitute the modified serialized graph as TensorFlow graph
 with g.to_tf_graph().as_default():
-  # ...and print the value of c, which should be 2x3 matrix of 3.0's
+
+  # Run a session using the modified graph and print the value of c
   with tf.Session() as sess:
     res = sess.run(c.name)
     print("Result is:\n{}".format(res))
+```
+
+```
+Result is:
+[[3. 3. 3.]
+ [3. 3. 3.]]
 ```
 
 ## Project status
