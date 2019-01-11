@@ -21,7 +21,36 @@ classes that the original graph editor depended on. TensorFlow's C++
 [Graph Transform Tool](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/tools/graph_transforms/README.md)
 also operates over serialized graphs.
 
-TODO: Example usage
+Example usage:
+```python
+import tensorflow as tf
+import graph_def_editor as gde
+# Create a graph
+tf_g = tf.Graph()
+with tf_g.as_default():
+  a = tf.constant(1.0, shape=[2, 3], name="a")
+  c = tf.add(
+      tf.placeholder(dtype=np.float32),
+      tf.placeholder(dtype=np.float32),
+      name="c")
+
+# Serialize the graph
+g = gde.Graph(tf_g.as_graph_def())
+
+# Modify the graph.
+# In this case we replace the two input placeholders with constants.
+# One of the constants (a) is a node that was in the original graph.
+# The other one (b) we create here.
+b = gde.make_const(g, "b", np.full([2, 3], 2.0, dtype=np.float32))
+gde.swap_inputs(g[c.op.name], [g[a.name], b.output(0)])
+
+# Reconstitute the modified serialized graph as TensorFlow graph...
+with g.to_tf_graph().as_default():
+  # ...and print the value of c, which should be 2x3 matrix of 3.0's
+  with tf.Session() as sess:
+    res = sess.run(c.name)
+    print("Result is:\n{}".format(res))
+```
 
 ## Project status
 
@@ -34,19 +63,21 @@ Current status:
 
 ## Contents of root directory:
 
-* LICENSE: This project is released under an Apache v2 license
-* env: Not in git repo; create by running `scripts/env.sh`. Anaconda virtualenv
+* `LICENSE`: This project is released under an Apache v2 license
+* `env`: Not in git repo; create by running `scripts/env.sh`. Anaconda virtualenv
   for running tests and notebooks in this project.
-* examples: Example scripts.  To run these scripts from the root directory use,
+* `examples`: Example scripts.  To run these scripts from the root directory use,
   the command 
   ```
   PYTHONPATH=$PWD env/bin/python examples/script_name.py
   ```
   where `script_name.py` is the name of the example script.
-* notebooks: Jupyter notebooks.
-* graph\_def\_editor: Source code for the Python package
-* scripts: Useful shell scripts for development.
-* tests: pytest tests. To run these tests, create `env` and run
+* `notebooks`: Jupyter notebooks.
+* `graph\_def\_editor`: Source code for the Python package
+* `scripts`: Useful shell scripts for development.
+* `setup.py`: Setup script to make this project pip-installable with 
+   [`setuptools`](https://setuptools.readthedocs.io/en/latest/)
+* `tests`: pytest tests. To run these tests, create `env` and run
   `scripts/test.sh`
 
 ## IDE setup instructions
