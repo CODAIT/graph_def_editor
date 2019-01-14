@@ -35,6 +35,9 @@ from graph_def_editor.util import *
 from graph_def_editor.variable import *
 # pylint: enable=wildcard-import
 
+# Other parts go under sub-packages
+from graph_def_editor import rewrite
+
 # some useful aliases
 # pylint: disable=g-bad-import-order
 from graph_def_editor import subgraph as _subgraph

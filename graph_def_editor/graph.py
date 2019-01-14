@@ -1,4 +1,4 @@
-# Copyright 2018 IBM. All Rights Reserved.
+# Copyright 2019 IBM. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,6 +30,14 @@ __all__ = [
 # Special attribute in which TensorFlow stores frame names for while loops (
 # see node_to_frame_name() for more information
 _FRAME_NAME_ATTR = "frame_name"
+
+
+class GraphVisitor(object):
+  """
+  Visitor callback for various graph traversals
+  """
+  def visit_node(self, n: 'node.Node'):
+    raise NotImplementedError()
 
 
 class Graph(object):
@@ -562,6 +570,57 @@ class Graph(object):
       self._generate_node_to_frame_name()
     return self._frame_name_to_nodes.keys()
 
+  def breadth_first_visitor(self, visitor: GraphVisitor,
+                            starting_nodes: Iterable['node.Node'] = None):
+    """
+    Visit all nodes reachable from a starting set in the order of a
+    breadth-first traversal. Invokes a callback at each node visited.
+
+    Args:
+      visitor: Possibly-stateful callback to be invoked on each node reached
+      starting_nodes: Optional list of starting nodes. If this set is not
+         provided, this method will use all nodes with zero inputs as the
+         starting set. Search will visit these nodes first, then visit their
+         children in order by parent node.
+    """
+    if starting_nodes is None:
+      # Start with all of the nodes in the graph that have no inputs.
+      # The maintainers of the TensorFlow scheduler like to call these nodes
+      # "root nodes".
+      starting_nodes = [n for n in self.nodes if 0 == len(n.inputs)]
+
+    # Use a Python list as a node queue for the breadth-first search.
+    queue = list(starting_nodes)
+    enqueued_nodes = set(queue)
+
+    while len(queue) > 0:
+      cur_node = queue.pop(0)
+      visitor.visit_node(cur_node)
+
+      # Prepare for next stage of search
+      for out_tensor in cur_node.outputs:
+        for out_node in out_tensor.consumers():
+          if out_node not in enqueued_nodes:
+            queue.append(out_node)
+            enqueued_nodes.add(out_node)
+
+  def infer_shapes_and_dtypes(self,
+                              starting_nodes: Iterable['node.Node'] = None):
+    """
+    Visit all nodes reachable from a starting set in the order of a
+    breadth-first traversal, invoking shape and type inference.
+
+    Args:
+      starting_nodes: Optional list of starting nodes. If this set is not
+         provided, this method will use all nodes with zero inputs as the
+         starting set. Search will visit these nodes first, then visit their
+         children in order by parent node.
+    """
+    class _MyVisitor(GraphVisitor):
+      def visit_node(self, cur_node: 'node.Node'):
+        cur_node.infer_outputs()
+    self.breadth_first_visitor(_MyVisitor(), starting_nodes)
+
   def _generate_node_to_frame_name(self):
     """
     Regenerate the tables behind the node_to_frame_name and
@@ -570,56 +629,43 @@ class Graph(object):
     ExecutorImpl::BuildControlFlowInfo() in
     tensorflow/core/common_runtime/executor.cc
     """
-    new_node_to_frame_names = {}
-    new_frame_name_to_nodes = {}
+    class _MyVisitor(GraphVisitor):
+      def __init__(self):
+        # Maintain a stack of frame names, a la the original code in
+        # executor.cc.
+        # We use None to represent the root frame.
+        self.frame_name_stack = [None]
+        self.frame_name_tuple = tuple()  # Immutable version for table
 
-    # Use a Python list as a node queue for the breadth-first search.
-    # Start with all of the nodes in the graph that have no inputs.
-    # The maintainers of the TensorFlow scheduler like to call these nodes
-    # "root nodes".
-    queue = [n for n in self.nodes if 0 == len(n.inputs)]
-    visited = set(queue)  # Invariant: visited == all nodes enqueued
+        self.new_node_to_frame_names = {}
+        self.new_frame_name_to_nodes = {}
 
-    # Use a second list to maintain a stack of frame names, a la the original
-    # code in executor.cc.
-    # We use None to represent the root frame.
-    frame_name_stack = [None]
-    frame_name_tuple = tuple()  # Immutable version for table
+      def visit_node(self, cur_node: 'node.Node'):
+        if cur_node.op_type in ["Enter", "RefEnter"]:
+          # Entering a while loop. Push a frame name onto the virtual stack
+          if _FRAME_NAME_ATTR not in cur_node.get_attr_keys():
+            raise ValueError("Node {} is of op type {} but does not have a "
+                             "value for its {}"
+                             " attribute".format(cur_node.name,
+                                                 cur_node.op_type,
+                                                 _FRAME_NAME_ATTR))
+          self.frame_name_stack.append(cur_node.get_attr(_FRAME_NAME_ATTR))
+          self.frame_name_tuple = tuple(self.frame_name_stack)
+        elif cur_node.op_type in ["Exit", "RefExit"]:
+          self.frame_name_stack.pop(-1)
+          self.frame_name_tuple = tuple(self.frame_name_stack)
+        # Update tables
+        self.new_node_to_frame_names[cur_node] = self.frame_name_tuple
+        for f in self.frame_name_stack:
+          self.new_frame_name_to_nodes.setdefault(f, []).append(cur_node)
 
-    # Breadth-first search; same algorithm as in the C++ code, except that
-    # instead of keeping a stack of parent ops we keep a stack of frame names.
-    while len(queue) > 0:
-      # Update data structures that track the stack
-      cur_node = queue.pop(0)
-      if cur_node.op_type in ["Enter", "RefEnter"]:
-        # Entering a while loop. Push a frame name onto the virtual stack
-        if _FRAME_NAME_ATTR not in cur_node.get_attr_keys():
-          raise ValueError("Node {} is of op type {} but does not have a "
-                           "value for its {}"
-                           " attribute".format(cur_node.name,
-                                               cur_node.op_type,
-                                               _FRAME_NAME_ATTR))
-        frame_name_stack.append(cur_node.get_attr(_FRAME_NAME_ATTR))
-        frame_name_tuple = tuple(frame_name_stack)
-      elif cur_node.op_type in ["Exit", "RefExit"]:
-        frame_name_stack.pop(-1)
-        frame_name_tuple = tuple(frame_name_stack)
-      # Update tables
-      new_node_to_frame_names[cur_node] = frame_name_tuple
-      for frame_name in frame_name_stack:
-        new_frame_name_to_nodes.setdefault(frame_name, []).append(cur_node)
-      # Prepare for next stage of search
-      for out_tensor in cur_node.outputs:
-        for out_node in out_tensor.consumers():
-          if out_node not in visited:
-            queue.append(out_node)
-            visited.add(out_node)
-
-    self._node_to_frame_names = new_node_to_frame_names
+    visitor = _MyVisitor()
+    self.breadth_first_visitor(visitor)
+    self._node_to_frame_names = visitor.new_node_to_frame_names
     # Reverse mapping was built a dict of lists to avoid O(n^2) behavior.
     # Convert to dict of tuples.
     self._frame_name_to_nodes = {
-      k: tuple(v) for k, v in new_frame_name_to_nodes.items()
+      k: tuple(v) for k, v in visitor.new_frame_name_to_nodes.items()
     }
 
   @property
@@ -643,6 +689,7 @@ class Graph(object):
       self._head_name_to_coloc_group = {
         k: frozenset(v) for k, v in head_name_to_coloc_group.items()}
     return self._head_name_to_coloc_group
+
 
 
 ################################################################################
@@ -703,8 +750,38 @@ def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
     collection_items = tf_g.get_collection(collection_name)
     collection_proto = tf.MetaGraphDef.CollectionDefEntry()
     collection_proto.key = collection_name
+    if len(collection_items) == 0:
+      continue
+    first_item_type = type(collection_items[0])
+    if issubclass(first_item_type, tf.Variable):
+      collection_type = tf.Variable
+    elif issubclass(first_item_type, tf.Operation):
+      collection_type = tf.Operation
+    elif issubclass(first_item_type, tf.Tensor):
+      collection_type = tf.Tensor
+    elif first_item_type.__name__ in ("WhileContext", "CondContext"):
+      print("Skipping collection {} of type {}.".format(
+        collection_name, first_item_type))
+      # TODO(frreiss): Should we serialize WhileContexts or CondContexts?
+      continue
+    else:
+      raise NotImplementedError("Can't serialize item '{}' in collection "
+                                "'{}' because it is a "
+                                "'{}'.".format(collection_items[0],
+                                               collection_name,
+                                               first_item_type.__name__))
+
+    # Make sure that everything in the collection is of the same type.
     for item in collection_items:
-      if isinstance(item, tf.Variable):
+      if not isinstance(item, collection_type):
+        raise TypeError("Item '{}' in collection "
+                        "'{}' is of unexpected type "
+                        "'{}' (should be subclass of "
+                        "{}).".format(item, collection_name,
+                                      type(item), collection_type))
+
+    if collection_type is tf.Variable:
+      for item in collection_items:
         # Ask TensorFlow to generate the protobuf version of this variable
         var_proto = item.to_proto()
 
@@ -712,19 +789,15 @@ def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
         # reason.
         collection_proto.value.bytes_list.value.append(
           var_proto.SerializeToString())
-      elif type(item).__name__ == "WhileContext":
-        # TODO(frreiss): Should we serialize WhileContexts?
-        print("Skipping collection {} -- is WhileContext.".format(
-          collection_name))
-      elif type(item).__name__ == "CondContext":
-        # TODO(frreiss): Should we serialize CondContexts?
-        print("Skipping collection {} -- is CondContext.".format(
-          collection_name))
-      else:
-        raise NotImplementedError("Can't serialize item '{}' in collection "
-                                  "'{}' because it is a "
-                                  "'{}'.".format(item, collection_name,
-                                                 type(item).__name__))
+    elif collection_type in (tf.Operation, tf.Tensor):
+      # Collection of nodes or tensors; store as node/tensor names
+      for item in collection_items:
+        collection_proto.value.node_list.value.append(
+          tf.compat.as_bytes(item.name))
+    else:
+      raise NotImplementedError("Unexpected collection type {}".format(
+        collection_type))
+
 
     ret.append(collection_proto)
   return ret

@@ -62,7 +62,7 @@ class Node(object):
     self._name = name
     self._op_name = op_name
     self._device = device
-    self._attributes = []
+    self._attributes = [] # List[Tuple[str,Any]]
     self._inputs = []
     self._outputs = []
     self._control_inputs = []
@@ -415,32 +415,79 @@ class Node(object):
         raise ValueError("Tried to set special '{}' attribute when the "
                          "Node already has colocation "
                          "groups".format(_COLOCATION_ATTR_NAME))
-      elif isinstance(value, tf.AttrValue):
-        # Internal TF type; convert to iterable of Python strings
-        if value.list.s is None:
-          raise ValueError("Tried to set special '{}' attribute using "
-                           "tf.AttrValue object, and the object's 'list.s' "
-                           "attribute was not populated. Value: '{}'".format(
-                              _COLOCATION_ATTR_NAME, str(value)))
-        value = [tf.compat.as_str(s_i) for s_i in value.list.s]
-      elif not isinstance(value, list) and not isinstance(value, tuple):
-        raise ValueError("Tried to set special '{}' attribute with a type "
-                         "other than list or tuple. Type is '{}' and value "
-                         "is '{}'".format(_COLOCATION_ATTR_NAME, type(value),
-                                          str(value)))
-      for elem in value:
-        if not elem.startswith(_COLOCATION_PREFIX):
-          raise ValueError("Tried to set special '{}' attribute with "
-                           "something other than a string starting with "
-                           "'{}' (value used: "
-                           "'{}')".format(_COLOCATION_ATTR_NAME,
-                                          _COLOCATION_PREFIX, elem))
-        self.add_colocation_group(elem[len(_COLOCATION_PREFIX):],
+      for group_name in self._validate_colocation_group_attr(value):
+        self.add_colocation_group(group_name,
                                   validate=validate_colocation_groups)
     elif key in self._attr_names():
       raise ValueError("Already have an attribute called '{}'".format(key))
     else:
       self._attributes.append((key, value))
+
+  @staticmethod
+  def _validate_colocation_group_attr(value: str) -> List[str]:
+    """Validate a potential value for the special "_class" attribute that
+    holds collocation groups.
+
+    Returns a list of node names that comprise the group."""
+    if isinstance(value, tf.AttrValue):
+      # Internal TF type; convert to iterable of Python strings
+      if value.list.s is None:
+        raise ValueError("Tried to set special '{}' attribute using "
+                         "tf.AttrValue object, and the object's 'list.s' "
+                         "attribute was not populated. Value: "
+                         "'{}'".format(_COLOCATION_ATTR_NAME, str(value)))
+      value = [tf.compat.as_str(s_i) for s_i in value.list.s]
+    elif not isinstance(value, list) and not isinstance(value, tuple):
+      raise ValueError("Tried to set special '{}' attribute with a type "
+                       "other than list or tuple. Type is '{}' and value "
+                       "is '{}'".format(_COLOCATION_ATTR_NAME, type(value),
+                                        str(value)))
+    ret = []
+    for elem in value:
+      if not elem.startswith(_COLOCATION_PREFIX):
+        raise ValueError("Tried to set special '{}' attribute with "
+                         "something other than a string starting with "
+                         "'{}' (value used: "
+                         "'{}')".format(_COLOCATION_ATTR_NAME,
+                                        _COLOCATION_PREFIX, elem))
+      ret.append(elem[len(_COLOCATION_PREFIX):])
+    return ret
+
+  def replace_attr(self, key: str, value: Any,
+                   validate_colocation_groups: bool = False):
+    """
+    Replace an existing attribute in the underlying NodeDef's attr list,
+    without changing the order of the list.
+
+    If you use this method to set the special "_class" attribute,
+    will redirect to a call to the setter for the `colocation_groups`
+    property.
+
+    Args:
+      key: Name of the attribute. Must be unique.
+      value: Value to put in place for the attribute. Can be a Python type or a
+        TensorFlow protocol buffer wrapper class.
+      validate_colocation_groups: If True and this method is setting colocation
+        groups via the special '_class' attribute, raise an exception if the
+        primary node of the colocation group does not exist.
+    """
+    if key == _COLOCATION_ATTR_NAME:
+      # Special magic key name for colocation groups; see docstring for
+      # colocation_groups property.
+      if len(self.colocation_groups) == 0:
+        raise ValueError("Tried to replace special '{}' attribute when the "
+                         "Node does not have any colocation "
+                         "groups".format(_COLOCATION_ATTR_NAME))
+      for group_name in self._validate_colocation_group_attr(value):
+        self.add_colocation_group(group_name,
+                                  validate=validate_colocation_groups)
+    elif key not in self._attr_names():
+      raise ValueError("No attribute called '{}'".format(key))
+    else:
+      for i in range(len(self._attributes)):
+        if self._attributes[i][0] == key:
+          self._attributes[i] = (key, value)
+          break
 
   def clear_attrs(self):
     """
