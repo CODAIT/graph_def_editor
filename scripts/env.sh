@@ -42,10 +42,10 @@ rm -rf ./env
 conda create -y --prefix ./env \
     python=${PYTHON_VERSION} \
     numpy \
-    tensorflow\
+    tensorflow \
     jupyterlab \
     pytest \
-    -c conda-forge
+    keras
 
 echo << EOM
 Anaconda virtualenv installed in ./env.
