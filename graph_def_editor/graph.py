@@ -18,13 +18,25 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import datetime
+from distutils import dir_util
+import os
 import tensorflow as tf
-from typing import Tuple, Dict, FrozenSet, Iterable, Union
+from typing import Tuple, Dict, FrozenSet, Iterable, Union, Set, Any
 
 from graph_def_editor import node, util, tensor, variable
 
+# TODO: Move this protobuf into this project so we don't depend on
+#  tf.core.framework
+from tensorflow.core.protobuf import saved_model_pb2, meta_graph_pb2
+
+
 __all__ = [
   "Graph",
+  "SaverInfo",
+  "SignatureInfo",
+  "GraphVisitor",
+  "saved_model_to_graph",
 ]
 
 # Special attribute in which TensorFlow stores frame names for while loops (
@@ -40,6 +52,49 @@ class GraphVisitor(object):
     raise NotImplementedError()
 
 
+class SaverInfo(object):
+  """
+  Object to encapsulate information about a `tf.train.Saver` object that can
+  reconstitute the variable values for this graph.
+  """
+  def __init__(self, path: str, saver_def: tf.train.SaverDef):
+    """
+    Args:
+      path: Path to the location of serialized variable information on disk
+      saver_def: Serialized version of `tf.train.Saver` object
+    """
+    self.path = path
+    self.saver_def = saver_def
+
+class SignatureInfo(object):
+  """
+  Object that encapsulates information about entry points to the graph,
+  AKA signatures.
+  """
+  def __init__(self):
+    self._signature_defs = {}  # Dict[str, meta_graph_pb2.SignatureDef]
+
+  def add_signature_def(self,
+                        name: str,
+                        signature_def: meta_graph_pb2.SignatureDef):
+    """
+    Add a signature to the set of entry points.
+
+    Args:
+      name: Name for the entry point
+      signature_def: Definition of the entry point; specifies input and
+        output nodes and maps them to input and output names
+    """
+    if name in self._signature_defs:
+      raise ValueError("Already have a signature with name '{}'".format(name))
+    self._signature_defs[name] = signature_def
+
+  @property
+  def signature_defs(self):
+    return self._signature_defs
+
+
+
 class Graph(object):
   """
   Mutable surrogate for a `tf.GraphDef` protocol buffer message
@@ -53,8 +108,11 @@ class Graph(object):
                   collections
   """
 
-  def __init__(self, g: tf.GraphDef = None, collections:
-               Iterable[tf.MetaGraphDef.CollectionDefEntry] = None):
+  def __init__(self, g: Union[tf.Graph, tf.GraphDef] = None,
+               name: str = None,
+               collections: Iterable[tf.MetaGraphDef.CollectionDefEntry] = None,
+               saver_info: SaverInfo = None,
+               signature_info: SignatureInfo = None):
     """
     Wrap a tf.GraphDef protocol buffer in a Graph object.
 
@@ -62,10 +120,17 @@ class Graph(object):
       g: a tf.Graph or tf.GraphDef protobuf that represents a
         TensorFlow graph. If set to None, generate an empty
         tf.GraphDef
+      name: Optional human-readable name for the graph. If not provided,
+        the constructor will generate a name.
       collections: Optional iterable of tf.MetaGraphDef.CollectionDefEntry 
         objects containing information about collections in the graph.
         Note that this constructor will pull collection info out of `g` if
         it is a `tf.Graph` and `collections` is `None`.
+      saver_info: Optional serialiazed information about the
+        `tf.train.Saver` object that can save and restore variables in this
+        graph.
+      signature_info: Optional semi-serialized information about entry points
+        to the graph, AKA signatures
     """
     if g is None:
       graph_def = tf.GraphDef()
@@ -78,16 +143,29 @@ class Graph(object):
     else:
       raise TypeError("Graph is of type {}. Expected a tf.Graph or GraphDef "
                       "proto".format(type(g)))
+    if name is None:
+      time_str = datetime.datetime.now().isoformat()
+      name = "GraphDef Editor Graph created {}".format(time_str)
+    if signature_info is None:
+      signature_info = SignatureInfo()
+    elif not isinstance(signature_info, SignatureInfo):
+      raise ValueError("signature_info argument must be a SignatureInfo object")
+
+    # Populate fields of object
+    self._name = name  # str
     self._version = 0  # Must happen first; other init code needs self._version
-    self._frozen = False
-    self._graph_def = graph_def
-    self._next_id = 1
+    self._frozen = False  # bool
+    self._graph_def = graph_def  # tf.GraphDef
+    self._next_id = 1  # int
     output_map = _decode_graph(graph_def)
     self._node_name_to_node = {}  # Dict[str, node.Node]; key is node name
     self._node_to_frame_names = None
     self._frame_name_to_nodes = None
     self._head_name_to_coloc_group = None  # Dict[str, FrozenList[str]]
     self._variable_name_to_variable = {}  # Dict[str, Variable]
+    self._collection_name_to_type = None # Dict[str, str], generated on demand
+    self._passthrough_collections = {} # Dict[str, List[CollectionDef]]
+    self._passthrough_saver = None
 
     # Load nodes in three passes because the g may contain cycles.
     for node_def in graph_def.node:
@@ -97,11 +175,27 @@ class Graph(object):
     for node_def in graph_def.node:
       self[node_def.name].set_inputs_from_strings(node_def.input,
                                                   set_control_inputs=True)
-
-    self._collections = {}
+    # Collections reference nodes and variables
     if collections is not None:
       for c in collections:
         self.add_collection_from_collection_def(c)
+
+    # Presence of a passthrough saver prevents adding additional variables,
+    # so load after variables are constituted (i.e. from collections)
+    self._passthrough_saver = saver_info
+    self._signatures = signature_info
+
+  @property
+  def name(self):
+    """
+    Returns human-readable name for this graph. This name may not be unique
+    across graphs.
+    """
+    return self._name
+
+  @property
+  def has_passthrough_saver(self):
+    return self._passthrough_saver is not None
 
   def add_node_from_node_def(self, node_def: tf.NodeDef,
                              set_inputs: bool = False) -> 'node.Node':
@@ -126,18 +220,43 @@ class Graph(object):
       ret.set_inputs_from_strings(node_def.input, set_control_inputs=True)
     return ret
 
-  def add_collection_from_collection_def(self, collection_def:
-                                         tf.MetaGraphDef.CollectionDefEntry):
+  def add_collection_from_collection_def(
+          self,
+          collection_def: tf.MetaGraphDef.CollectionDefEntry,
+          validate_name: bool = True):
     """
     Unpack a `tf.MetaGraphDef.CollectionDefEntry` of serialized variables 
     into a collection of variables in this graph. The collection must not exist. 
     Variables that do not already exist will be created.
+    
+    Args:
+      collection_def: Serialized information about the collection
+      validate_name: Verify that a collection by this name doesn't already
+        exist. Set this argument to False to avoid O(n^2) behavior when
+        bulk-loading known-good collection metadata.
     """
     collection_name = collection_def.key
-    for serialized_var in collection_def.value.bytes_list.value:
-      var = self.add_variable_from_variable_def(serialized_var,
-                                                skip_if_present=True)
-      var.add_to_collection(collection_name)
+    if validate_name and collection_name in self.get_all_collection_keys():
+      raise ValueError("Collection '{}' already exists".format(collection_name))
+    collection = collection_def.value
+    # The collection is stored in exactly one of five different formats.
+    if collection.HasField("node_list"):
+      for node_name in collection_def.value.node_list.value:
+        n = self.get_node_by_name(node_name)
+        n.add_to_collection(collection_name)
+    elif collection.HasField("bytes_list"):
+      for serialized_var in collection_def.value.bytes_list.value:
+        var = self.add_variable_from_variable_def(serialized_var,
+                                                  skip_if_present=True)
+        var.add_to_collection(collection_name)
+    elif (collection.HasField("int64_list")
+          or collection.HasField("float_list")
+          or collection.HasField("any_list")):
+      self._passthrough_collections[collection_name] = collection
+      if self._collection_name_to_type is not None:
+        self._collection_name_to_type[collection_name] = "passthrough"
+    else:
+      raise ValueError("Unknown collection type: {}".format(collection))
 
   def __getitem__(self, name: str) -> Union[tensor.Tensor, 'node.Node']:
     """
@@ -282,7 +401,7 @@ class Graph(object):
   def variable_names(self):
     return self._variable_name_to_variable.keys()
 
-  def name_to_variable(self, name: str) -> variable.Variable:
+  def get_variable_by_name(self, name: str) -> variable.Variable:
     """
     Fetch a variable by its variable name.
 
@@ -414,14 +533,18 @@ class Graph(object):
       ))
     return n.output(output_ix)
 
-  def to_graph_def(self):
+  def to_graph_def(self, add_shapes: bool = True):
     """
+    Args:
+      add_shapes: If True, add the special "_output_shapes" attribute with
+        output shape information from this Node's output metadata.
+
     Returns the `tf.GraphDef` serialization of this graph in its current
     form.
     """
     ret = tf.GraphDef()
     for op in self.nodes:
-      op.to_node_def(ret.node.add())
+      op.to_node_def(ret.node.add(), add_shapes)
     return ret
 
   def to_tf_graph(self):
@@ -437,6 +560,143 @@ class Graph(object):
       tf.import_graph_def(self.to_graph_def(), name="")
       util.load_variables_to_tf_graph(self)
     return ret
+
+  def to_saved_model(self, saved_model_path: str,
+                     tags: Iterable[str] = None) -> \
+          saved_model_pb2.SavedModel:
+    """
+    Writes this graph out as a TensorFlow SavedModel on disk.
+
+    Args:
+      saved_model_path: Location where the root directory of the SavedModel
+        should reside.
+      tags: What tag strings should be associated with the MetaGraph that this
+        method puts inside the SavedModel. If None, use the
+        tag `tf.saved_model.tag_constants.SERVING`
+
+    Returns the SavedModel protocol buffer message that it wrote to the
+    specified location.
+    """
+    if tags is None:
+      tags = [tf.saved_model.tag_constants.SERVING]
+    if os.path.exists(saved_model_path):
+      raise ValueError("Output path '{}' already exists".format(
+        saved_model_path))
+    if not os.path.exists(os.path.dirname(saved_model_path)):
+      raise ValueError("Parent directory '{}' of output dir '{}' does not "
+                       "exist".format(os.path.dirname(saved_model_path),
+                                      saved_model_path))
+    os.mkdir(saved_model_path)
+
+    # Core part of the SavedModel is a protocol buffers file containing a
+    # SavedModel protocol buffer message.
+    # See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/
+    # core/protobuf/saved_model.proto
+    saved_model = saved_model_pb2.SavedModel()
+    saved_model.saved_model_schema_version = 1
+
+    # Inside the SavedModel protobuf is a list of MetaGraphDef protobufs. In
+    # this case there is only one.
+    # See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/
+    # core/protobuf/meta_graph.proto
+    meta_graph = saved_model.meta_graphs.add()
+
+    # The MetaGraphDef message contains a nested header called a MetaInfoDef.
+    # The first field of the MetaInfoDef is called "meta_graph_version".
+    # This field does not actually hold the version of the MetaGraph. Instead
+    # it holds an arbitrary string that can be whatever you want.
+    meta_info_def = tf.MetaGraphDef.MetaInfoDef()
+    meta_info_def.meta_graph_version = self.name
+
+    # The second field, "stripped_op_list" holds "A copy fo the OpDefs used by
+    # the producer of this graph_def". According to the docs for
+    # tf.import_graph_def, this field is deprecated. This field does not
+    # appear to have ever accomplished anything useful.
+    # TensorFlow fills this field with a deluge of OpDef information. We leave
+    # this field out.
+
+    # The third field, "any_info", provides a place for holding additional
+    # arbitrary information. We also leave this field out.
+
+    # The fourth field holds the string tags for this MetaGraph
+    meta_info_def.tags.extend(tags)
+
+    # The fifth and sixth fields hold TensorFlow version information.
+    # We punt here and populate these fields with the version info from
+    # the current Python session's copy of TensorFlow.
+    meta_info_def.tensorflow_version = tf.VERSION
+    meta_info_def.tensorflow_git_version = tf.GIT_VERSION
+
+    # The final field, "stripped_default_attrs", is "A flag to denote whether
+    # default-valued attrs have been stripped from the nodes in this graph_def"
+    # The TensorFlow authors appear to have added this field in the hopes
+    # that future versions of the system might be able to use it for forwards
+    # compatibility. No code in TensorFlow currently reads this attribute. We
+    # set it to False.
+    meta_info_def.stripped_default_attrs = False
+
+    meta_graph.meta_info_def.CopyFrom(meta_info_def)
+
+    # After the meta_info_def comes a GraphDef proto holding all the graph
+    # nodes that this MetaGraph uses. If an op in the original TensorFlow
+    # graph is in multiple MetaGraphs, that op will be stored ONCE PER
+    # METAGRAPH under this field. In our case there is exactly one
+    # MetaGraph in the SavedModel.
+    meta_graph.graph_def.CopyFrom(self.to_graph_def())
+
+    # The next field, "saver_def", holds information about the tf.Saver
+    # instance that will be used to reconstitute any variables in the graph
+    if self.has_passthrough_saver:
+      meta_graph.saver_def.CopyFrom(self._passthrough_saver.saver_def)
+      # Copy serialized variables checkpoint wholesale, because the checkpoint
+      # format is a black box to us.
+      dir_util.copy_tree(self._passthrough_saver.path,
+                         _vars_dir_for_saved_model(saved_model_path))
+    elif len(self.variable_names) > 0:
+      raise NotImplementedError("Can't generate a SaverDef.")
+    else:
+      # Zero variables, no passthrough SaverDef.
+      # For this case, TensorFlow creates an empty variables directory and
+      # doesn't set the "saver_def" field. We emulate this behavior.
+      os.mkdir(_vars_dir_for_saved_model(saved_model_path))
+
+    # The next field, "collection_def", holds serialized information about all
+    # collections in the MetaGraph.
+    if self._collection_name_to_type is None:
+      self._build_collection_name_to_type()
+    for coll_name, coll_type in self._collection_name_to_type.items():
+      if coll_type == "passthrough":
+        meta_graph.collection_def[coll_name] = self._passthrough_collections[
+          coll_name]
+      elif coll_type == "variable":
+        vars_list = self.get_collection_by_name(coll_name)
+        serialized_vars = [v.to_proto().SerializeToString() for v in vars_list]
+        meta_graph.collection_def[coll_name].bytes_list.value.extend(
+          serialized_vars)
+      elif coll_type == "node":
+        nodes_list = self.get_collection_by_name(coll_name)
+        meta_graph.collection_def[coll_name].node_list.value.extend(
+          [n.name for n in nodes_list])
+      else:
+        raise ValueError("Unknown collection type '{}'".format(coll_type))
+
+    # The next field, "signature_def", contains information about
+    # input/output signatures that this MetaGraph  supports.
+    for sig_name, sig_def  in self.signatures.items():
+      meta_graph.signature_def[sig_name].CopyFrom(sig_def)
+
+    # The final field, asset_file_def, stores information about additional
+    # assets that are packaged along with the graph in the SavedModel's
+    # "assets" directory. Fow now we leave this field empty.
+    # TODO(frreiss): Represent assets as a field in the Graph class and
+    #  serialize them here.
+
+    # At this point, we have created the root directory for the SavedModel,
+    # as well as the checkpoints directory. The only thing left to write is
+    # the SavedModel protobuf itself.
+    with open(saved_model_path + "/saved_model.pb", "wb") as f:
+      f.write(saved_model.SerializeToString())
+    return saved_model
 
   @property
   def version(self):
@@ -468,8 +728,9 @@ class Graph(object):
     self._node_to_frame_names = None
     self._frame_name_to_nodes = None
     self._head_name_to_coloc_group = None
+    self._collection_name_to_type = None
 
-  def get_collection(self, name: str):
+  def get_collection_by_name(self, name: str) -> Iterable[Any]:
     """Fetch the contents of a collection, similarly to the method in
     `tf.Graph` by the same name.
 
@@ -480,11 +741,59 @@ class Graph(object):
       The values in the collection. Currently any type is allowed in these
       values, following the conventions of the TensorFlow APIs.
     """
-    return self._collections[name]
+    if self._collection_name_to_type is None:
+      self._build_collection_name_to_type()
+    if name not in self._collection_name_to_type:
+      raise ValueError("No collection with name '{}'".format(name))
+    coll_type = self._collection_name_to_type[name]
+    if coll_type == "passthrough":
+      return self._passthrough_collections[name]
+    elif coll_type == "variable":
+      ret = []
+      for v_name in self.variable_names:
+        v = self.get_variable_by_name(v_name)
+        if name in v.collection_names:
+          ret.append(v)
+      return ret
+    elif coll_type == "node":
+      ret = []
+      for n in self.nodes:
+        if name in n.collection_names:
+          ret.append(n)
+      return ret
+    else:
+      raise ValueError("Unknown collection type '{}'".format(coll_type))
+
+  def _build_collection_name_to_type(self):
+    self._collection_name_to_type = {}
+    passthrough_collection_names = set(self._passthrough_collections.keys())
+    variable_collection_names = set()
+    node_collection_names = set()
+    for var_name in self.variable_names:
+      v = self.get_variable_by_name(var_name)
+      for name in v.collection_names:
+        variable_collection_names.add(name)
+    for n in self.nodes:
+      for name in n.collection_names:
+        node_collection_names.add(name)
+    def _add(names, type_name):
+      for coll_name in names:
+        if coll_name in self._collection_name_to_type:
+          raise ValueError((
+            _duplicate_collection_error_str(coll_name,
+                                            passthrough_collection_names,
+                                            variable_collection_names,
+                                            node_collection_names)))
+        self._collection_name_to_type[coll_name] = type_name
+    _add(passthrough_collection_names, "passthrough")
+    _add(variable_collection_names, "variable")
+    _add(node_collection_names, "node")
 
   def get_all_collection_keys(self):
     """Returns the keys associated with all collections stored in this object"""
-    return self._collections.keys()
+    if self._collection_name_to_type is None:
+      self._build_collection_name_to_type()
+    return self._collection_name_to_type.keys()
 
   def _get_next_id(self) -> int:
     """Generates and returns a unique integer ID *within this graph*."""
@@ -690,7 +999,96 @@ class Graph(object):
         k: frozenset(v) for k, v in head_name_to_coloc_group.items()}
     return self._head_name_to_coloc_group
 
+  @property
+  def signatures(self) -> Dict[str, meta_graph_pb2.SignatureDef]:
+    """
+    Returns a map from signature name to signature definition. Changes to
+    this map will be reflected in this object.
+    """
+    return self._signatures.signature_defs
 
+
+def saved_model_to_graph(saved_model_path: str, tag: str = None,
+                         include_saver: bool = True,
+                         include_signatures: bool = True) -> 'Graph':
+  """
+  Load the contents of a TensorFlow SavedModel into a Graph object.
+
+  Args:
+    saved_model_path: Path to the SavedModel's directory on disk
+    tag: User-specified tag attached to the MetaGraphDef that should be
+      loaded from the SavedModel. If None, verify that there is only one
+      MetaGraphDef in the model and load that one.
+    include_saver: If True, attach black-box information about the SavedModel's
+      serialized `tf.Saver` object in the returned Graph object. Otherwise the
+      returned Graph will not contain any serialized variable values, though
+      it will contain variable initializers.
+    include_signatures: If True, attach signature information from the
+      SavedModel to the returned Graph object. Otherwise the returned graph
+      will have no signatures.
+
+  Returns: In-memory representation of the contents of the SavedModel as a
+  Graph object.
+  """
+  if not os.path.exists(saved_model_path):
+    raise ValueError("SavedModel root directory {} not found".format(
+      saved_model_path))
+  if not os.path.isdir(saved_model_path):
+    raise ValueError("SavedModel root path {} is not a directory".format(
+      saved_model_path))
+
+  # By convention, the main protobuf for the SavedModel is in a file called
+  # "saved_model.pb"
+  protobuf_file = saved_model_path + "/saved_model.pb"
+  saved_model = saved_model_pb2.SavedModel()
+  with open(protobuf_file, "rb") as f:
+    saved_model.ParseFromString(f.read())
+
+  # Drill down to pull out the appropriate MetaGraphDef proto
+  if tag is None:
+    if len(saved_model.meta_graphs) != 1:
+      raise ValueError("No tags specified and there are multiple "
+                       "MetaGraphDefs in the SavedModel. Please specify a "
+                       "tag to select a specific MetaGraphDef")
+    meta_graph = saved_model.meta_graphs[0]
+  else:
+    matching_ixs = [
+      i for i in range(len(saved_model.meta_graphs))
+      if tag in saved_model.meta_graphs[i].meta_info_def.tags
+    ]
+    if len(matching_ixs) == 0:
+      raise ValueError("No MetaGraphDef in SavedModel at {} contains tag "
+                       "'{}'".format(saved_model_path, tag))
+    if len(matching_ixs) > 1:
+      raise ValueError("{} different MetaGraphDef in SavedModel at {} "
+                       "contain tag '{}'. Please specify a tag that "
+                       "uniquely identifies a MetaGraphDef"
+                       "".format(len(matching_ixs), saved_model_path, tag))
+    meta_graph = saved_model.meta_graphs[matching_ixs[0]]
+
+  # Decompose the MetaGraphDef into the serialized components of the graph
+  graph_def = meta_graph.graph_def
+  collections = []
+  for collection_name in meta_graph.collection_def:
+    collection_proto = tf.MetaGraphDef.CollectionDefEntry()
+    collection_proto.key = collection_name
+    collection_proto.value.CopyFrom(
+      meta_graph.collection_def[collection_name])
+  if include_saver and meta_graph.HasField("saver_def"):
+    saver_info = SaverInfo(_vars_dir_for_saved_model(saved_model_path),
+                           meta_graph.saver_def)
+  else:
+    saver_info = None
+  signature_info = SignatureInfo()
+  if include_signatures:
+    for key in meta_graph.signature_def:
+      signature_info.add_signature_def(key, meta_graph.signature_def[key])
+
+  return Graph(graph_def,
+               name=meta_graph.meta_info_def.meta_graph_version,
+               collections=collections,
+               saver_info=saver_info,
+               signature_info=signature_info)
 
 ################################################################################
 # Stuff below this line is private to this file.
@@ -733,14 +1131,11 @@ def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
   """
   Convenience function to serialize all the collections in a TensorFlow graph.
 
-  **NOTE:** Currently this function only captures collections of variables.
-
   Args:
     tf_g: TensorFlow graph from which to harvest collections
 
   Returns a list of `tf.MetaGraphDef.CollectionDefEntry` protobuf containing
-  the serialized
-  contents of the collections.
+  the serialized contents of the collections.
   """
   ret = []
   for collection_name in tf_g.collections:
@@ -828,3 +1223,32 @@ def _decode_tensor_name(tensor_name: str, error_msg: str):
     output_ix = 0
 
   return node_name, output_ix
+
+def _duplicate_collection_error_str(name: str,
+                                    passthrough_collection_names: Set[str],
+                                    variable_collection_names: Set[str],
+                                    node_collection_names: Set[str]):
+  """
+  Generate an error string for the case where a collection ends up being of
+  multiple types simultaneously.
+  """
+  types = []
+  if name in passthrough_collection_names:
+    types.append("passthrough")
+  if name in variable_collection_names:
+    types.append("variable")
+  if name in node_collection_names:
+    types.append("node")
+  return (
+    "Collection name '{}' maps to multiple collection types: "
+    "{}".format(name, types))
+
+def _vars_dir_for_saved_model(saved_model_path: str) -> str:
+  """
+  Args:
+    saved_model_path: Root directory of a SavedModel on disk
+
+  Returns the location of the directory where the indicated SavedModel will
+  store its variables checkpoint.
+  """
+  return saved_model_path + "/variables"

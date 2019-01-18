@@ -50,8 +50,13 @@ class Variable(object):
     Args:
       g: gde.Graph object representing the containing graph
     """
+    if g.has_passthrough_saver:
+      # The internals of a tf.Saver are opaque to us.
+      raise ValueError("Attempted to add a variable to Graph '{}', which has "
+                       "an immutable serialized tf.Saver "
+                       "object.".format(g.name))
     self._graph = g
-    self._collection_names = set()
+    self._collection_names = set()  # Set[str]
 
     # Core fields are modeled after those of VariableDef.
     self._variable_name = None  # str
@@ -122,6 +127,21 @@ class Variable(object):
     if validate:
       self.validate(allow_duplicates)
 
+  def to_proto(self):
+    """
+    Inverse of `from_proto()` method.
+
+    Returns a `VariableDef` protocol buffer message that represents this
+    variable.
+    """
+    ret = variable_pb2.VariableDef()
+    ret.variable_name = self._variable_name
+    ret.initial_value_name = self._initial_value_name
+    ret.initializer_name = self._initializer_name
+    ret.snapshot_name = self._snapshot_name
+    ret.trainable = self._trainable
+    return ret
+
   def validate(self, allow_duplicate: bool = False):
     """
     Verify that all the names this variable references are valid in the
@@ -132,7 +152,7 @@ class Variable(object):
         same name, provided that the two variables are equal.
     """
     if self._variable_name in self.graph.variable_names:
-      other_var = self.graph.name_to_variable(self._variable_name)
+      other_var = self.graph.get_variable_by_name(self._variable_name)
       if other_var is not self:
         if not self.is_same_variable(other_var):
           raise ValueError("Existing '{}' in graph conflicts with this one "

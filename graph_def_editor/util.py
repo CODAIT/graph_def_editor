@@ -578,9 +578,9 @@ def _python_type_to_attr_list_elem(list_value: tf.AttrValue.ListValue,
   elif isinstance(elem, tf.DType):
     list_value.type.append(elem.as_datatype_enum)
   elif isinstance(elem, tf.TensorShape):
-    list_value.shape.append(elem.as_proto())
+    list_value.shape.add().CopyFrom(elem.as_proto())
   elif isinstance(elem, np.ndarray):
-    list_value.tensor.append(tf.make_tensor_proto(values=elem))
+    list_value.tensor.add().CopyFrom(tf.make_tensor_proto(values=elem))
   # TODO(frreiss): Populate the "func" field of the union here
   else:
     raise ValueError("Don't know how to convert a {} to "
@@ -681,7 +681,7 @@ def load_variables_to_tf_graph(g: 'graph.Graph'):
       should be loaded
   """
   for var_name in g.variable_names:
-    var = g.name_to_variable(var_name)
+    var = g.get_variable_by_name(var_name)
     tf_var = tf.Variable.from_proto(var.to_proto())
     tf.add_to_collections(var.collection_names, tf_var)
 

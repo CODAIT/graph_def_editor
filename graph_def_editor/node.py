@@ -19,7 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
-from typing import Tuple, List, Iterable, Any
+from typing import Tuple, List, Iterable, Any, AbstractSet, Sized
 
 from graph_def_editor import graph, tensor, util
 
@@ -30,6 +30,11 @@ _COLOCATION_ATTR_NAME = "_class"
 # Magical prefix that TensorFlow appends to node names to create colocation
 # group names.
 _COLOCATION_PREFIX = "loc:@"
+
+# Magical attribute name that TensorFLow uses to store shape information.
+# Note that TensorFlow will treat the value of this field as truth and will
+# skip shape inference if it is present.
+_OUTPUT_SHAPES_ATTR_NAME = "_output_shapes"
 
 __all__ = [
     "Node",
@@ -62,11 +67,12 @@ class Node(object):
     self._name = name
     self._op_name = op_name
     self._device = device
-    self._attributes = [] # List[Tuple[str,Any]]
+    self._attributes = []  # List[Tuple[str,Any]]
     self._inputs = []
-    self._outputs = []
+    self._outputs = None  # List[Tensor]
     self._control_inputs = []
-    self._colocation_groups = []
+    self._colocation_groups = []  # List[str]
+    self._collection_names = set()  # Set[str]
 
   def __repr__(self):
     return "Node[{}]".format(self.name)
@@ -86,6 +92,17 @@ class Node(object):
       Name of the TensorFlow op type that this Node represents
     """
     return self._op_name
+
+  def change_op_type(self, new_op_type: str):
+    """
+    Change the op type of this node. Does NOT rerun shape or type inference.
+
+    Args:
+      new_op_type: New string value for the operator type. Should correspond
+        to the name of a TensorFlow op, although this method does not validate
+        the string.
+    """
+    self._op_name = new_op_type
 
   @property
   def graph(self) -> 'graph.Graph':
@@ -111,6 +128,8 @@ class Node(object):
       current outputs of this node. Note that this tuple does not change if
       the underlying node is mutable and gets edited.
     """
+    if self._outputs is None:
+      raise ValueError("Outputs have not been set")
     return tuple(self._outputs)
 
   def output(self, index: int):
@@ -120,6 +139,8 @@ class Node(object):
     Returns:
       The Tensor corresponding to the indicated output of the node
     """
+    if self._outputs is None:
+      raise ValueError("Outputs have not been set")
     return self._outputs[index]
 
   @property
@@ -322,11 +343,13 @@ class Node(object):
         head_node_name))
     self._colocation_groups.append(head_node_name)
 
-  def to_node_def(self, target: tf.NodeDef = None):
+  def to_node_def(self, target: tf.NodeDef = None, add_shapes: bool = True):
     """
     Args:
       target: optional preallocated, empty NodeDef object to fill in. If not
         provided, this method will allocate a new `tf.NodeDef` object.
+      add_shapes: If True, add the special "_output_shapes" attribute with
+        output shape information from this Node's output metadata.
     Returns:
         A copy of the contents of this node as a NodeDef proto. The returned
         proto will *not* change if this node is changed after the call, and
@@ -350,8 +373,13 @@ class Node(object):
       # colocation_groups property for more information.
       transformed_names = [_COLOCATION_PREFIX + name
                            for name in self._colocation_groups]
-      target.attr["_class"].CopyFrom(
+      target.attr[_COLOCATION_ATTR_NAME].CopyFrom(
         util.python_type_to_attr_value(transformed_names)
+      )
+    if add_shapes and self._outputs is not None and len(self._outputs) > 0:
+      shapes_list = [t.shape for t in self._outputs]
+      target.attr[_OUTPUT_SHAPES_ATTR_NAME].CopyFrom(
+        util.python_type_to_attr_value(shapes_list)
       )
     return target
 
@@ -400,6 +428,10 @@ class Node(object):
     will redirect to a call to the setter for the `colocation_groups`
     property.
 
+    If you use this method to set the special "_output_shapes" attribute,
+    the method will redirect to a call to the set_outputs_from_pairs()
+    method.
+
     Args:
       key: Name of the attribute. Must be unique.
       value: Value to put in place for the attribute. Can be a Python type or a
@@ -415,43 +447,37 @@ class Node(object):
         raise ValueError("Tried to set special '{}' attribute when the "
                          "Node already has colocation "
                          "groups".format(_COLOCATION_ATTR_NAME))
-      for group_name in self._validate_colocation_group_attr(value):
+      for group_name in _validate_colocation_group_attr(value):
         self.add_colocation_group(group_name,
                                   validate=validate_colocation_groups)
+    elif key == _OUTPUT_SHAPES_ATTR_NAME:
+      # Special magic key name for output shapes.
+      new_shapes = _validate_output_shapes_attr(value)
+      self._update_shapes(new_shapes)
     elif key in self._attr_names():
       raise ValueError("Already have an attribute called '{}'".format(key))
     else:
       self._attributes.append((key, value))
 
-  @staticmethod
-  def _validate_colocation_group_attr(value: str) -> List[str]:
-    """Validate a potential value for the special "_class" attribute that
-    holds collocation groups.
-
-    Returns a list of node names that comprise the group."""
-    if isinstance(value, tf.AttrValue):
-      # Internal TF type; convert to iterable of Python strings
-      if value.list.s is None:
-        raise ValueError("Tried to set special '{}' attribute using "
-                         "tf.AttrValue object, and the object's 'list.s' "
-                         "attribute was not populated. Value: "
-                         "'{}'".format(_COLOCATION_ATTR_NAME, str(value)))
-      value = [tf.compat.as_str(s_i) for s_i in value.list.s]
-    elif not isinstance(value, list) and not isinstance(value, tuple):
-      raise ValueError("Tried to set special '{}' attribute with a type "
-                       "other than list or tuple. Type is '{}' and value "
-                       "is '{}'".format(_COLOCATION_ATTR_NAME, type(value),
-                                        str(value)))
-    ret = []
-    for elem in value:
-      if not elem.startswith(_COLOCATION_PREFIX):
-        raise ValueError("Tried to set special '{}' attribute with "
-                         "something other than a string starting with "
-                         "'{}' (value used: "
-                         "'{}')".format(_COLOCATION_ATTR_NAME,
-                                        _COLOCATION_PREFIX, elem))
-      ret.append(elem[len(_COLOCATION_PREFIX):])
-    return ret
+  def _update_shapes(self, new_shapes: List[tf.TensorShape]):
+    """
+    Put a set of output shapes in place without changing dtypes. Raises an
+    error if doing so would change the number of outputs. Sets dtypes to None
+    if no output information is present.
+    """
+    if self._outputs is None:
+      pairs = [(None, s) for s in new_shapes]
+      self.set_outputs_from_pairs(pairs)
+    else:
+      if len(new_shapes) != len(self._outputs):
+        raise ValueError("Attempted to put in place {} output shapes, "
+                         "but node has {} outputs.".format(len(new_shapes),
+                                                           len(self._outputs)))
+      # Update shapes in place to avoid creating new Tensor objects.
+      # If we created new Tensor objects, we would need to update all the
+      # downstream ops that used those Tensors as inputs.
+      for i in range(len(new_shapes)):
+        self._outputs[i].shape = new_shapes[i]
 
   def replace_attr(self, key: str, value: Any,
                    validate_colocation_groups: bool = False):
@@ -481,6 +507,10 @@ class Node(object):
       for group_name in self._validate_colocation_group_attr(value):
         self.add_colocation_group(group_name,
                                   validate=validate_colocation_groups)
+    elif key == _OUTPUT_SHAPES_ATTR_NAME:
+      # Special magic key name for output shapes.
+      new_shapes = _validate_output_shapes_attr(value)
+      self._update_shapes(new_shapes)
     elif key not in self._attr_names():
       raise ValueError("No attribute called '{}'".format(key))
     else:
@@ -509,8 +539,8 @@ class Node(object):
     self._control_inputs = list(new_control_inputs)
 
   def set_outputs_from_pairs(self,
-                             new_outputs: Iterable[Tuple[tf.DType,
-                                                         tf.TensorShape]]):
+                             new_outputs: List[Tuple[tf.DType,
+                                                     tf.TensorShape]]):
     """
     Set all outputs at once, removing anything that was there previously.
 
@@ -519,13 +549,26 @@ class Node(object):
     inference to infer the number, type, and shape of the node's outputs.
 
     Args:
-      new_outputs: Iterable of (dtype, shape) pairs that describe the outputs
+      new_outputs: List of (dtype, shape) pairs that describe the outputs
     """
-    self._outputs = []
-    i = 0
-    for (dtype, shape) in new_outputs:
-      self._outputs.append(tensor.Tensor(self, i, dtype, shape))
-      i += 1
+    if self._outputs is not None and len(new_outputs) != len(self._outputs):
+      # TODO(frreiss): Implement changing the number of outputs. This
+      #  implementation will require walking the graph and dealing with pointers
+      #  to Tensors that don't exist.
+      raise NotImplementedError("Attempted to change number of output tensors "
+                                "on node {} from {} to {}. Changing the "
+                                "number of output tensors is not currently "
+                                "supported.".format(self.name,
+                                                    len(self._outputs),
+                                                    len(new_outputs)))
+    elif self._outputs is None:
+      self._outputs = [tensor.Tensor(self, i, None, None)
+                       for i in range(len(new_outputs))]
+
+    # At this point, self._outputs is initialized. Update dtypes and shapes
+    # in place.
+    for i in range(len(new_outputs)):
+      self._outputs[i].dtype, self._outputs[i].shape = new_outputs[i]
     self._graph.increment_version_counter()  # Just in case
 
   def infer_outputs(self):
@@ -544,23 +587,33 @@ class Node(object):
     Raises:
       TBD
     """
-    # TF lack a supported API for invoking shape inference directly,
-    # so we instantiate a dummy graph and create a dummy Operation object
-    temp_graph = tf.Graph()
-    with temp_graph.as_default():
-      input_placeholders = [tf.placeholder(shape=t.shape, dtype=t.dtype) for
-                            t in self._inputs]
-      # See the docs for tf.Operation for important notes about the semantics
-      # of each arg to the following constructor.
-      dummy_op = tf.Operation(self.to_node_def(), temp_graph,
-                              inputs=input_placeholders)
-      self.set_outputs_from_pairs([(o.dtype, o.shape)
-                                   for o in dummy_op.outputs])
-      # set_outputs_from_pairs() increments the version counter, so we don't
-      # need to. Also, we haven't added edges to the graph until these
-      # outputs are connected to another node's inputs.
+    if self.op_type == "Assign":
+      # SPECIAL CASE: Assign op takes a reference as input. Don't build up a
+      # graph and invoke shape inference, because the APIs for references are
+      # in flux. Instead, just trust the attributes.
+      # First input is the reference, second is the value to put in place.
+      # Assign op returns the reference that it just assigned to.
+      input_ref = self._inputs[0]
+      self.set_outputs_from_pairs([(input_ref.dtype, input_ref.shape)])
+    else:
+      # Common case: Use shape inference.
+      # TF lacks a supported API for invoking shape inference directly,
+      # so we instantiate a dummy graph and create a dummy Operation object.
+      temp_graph = tf.Graph()
+      with temp_graph.as_default():
+        input_placeholders = [tf.placeholder(shape=t.shape, dtype=t.dtype) for
+                              t in self._inputs]
+        # See the docs for tf.Operation for important notes about the semantics
+        # of each arg to the following constructor.
+        dummy_op = tf.Operation(self.to_node_def(), temp_graph,
+                                inputs=input_placeholders)
+        self.set_outputs_from_pairs([(o.dtype, o.shape)
+                                     for o in dummy_op.outputs])
+        # set_outputs_from_pairs() increments the version counter, so we don't
+        # need to. Also, we haven't added edges to the graph until these
+        # outputs are connected to another node's inputs.
 
-      # TODO(frreiss): If this op has a "T" attribute, set that too.
+        # TODO(frreiss): If this op has a "T" attribute, set that too.
 
   def set_inputs_from_strings(self, new_inputs: Iterable[str],
                               set_control_inputs: bool = True):
@@ -582,7 +635,25 @@ class Node(object):
       self._control_inputs = _decode_control_inputs(new_inputs, self._graph)
     self._graph.increment_version_counter()  # New edges added to graph
 
+  @property
+  def collection_names(self) -> AbstractSet[str]:
+    """
+    Returns the names of all collections this node is a member of in the
+    parent graph.
+    """
+    return frozenset(self._collection_names)
 
+  def add_to_collection(self, collection_name: str):
+    """
+    Add the node to the indicated collection.
+    """
+    if collection_name in self._collection_names:
+      raise ValueError("Node '{}' already in collection '{}'".format(
+        self.name, collection_name))
+    self._collection_names.add(collection_name)
+    # Invalidate any information the parent graph may have cached about
+    # collections.
+    self._graph.increment_version_counter()
 
 
 ################################################################################
@@ -660,3 +731,51 @@ def _decode_control_inputs(inputs: Iterable[str], g: 'graph.Graph') -> List[
   return [g[name] for name in control_input_names]
 
 
+def _validate_colocation_group_attr(value: Any) -> List[str]:
+  """Validate a potential value for the special "_class" attribute that
+  holds collocation groups.
+
+  Returns a list of node names that comprise the group."""
+  if isinstance(value, tf.AttrValue):
+    # Internal TF type; convert to iterable of Python strings
+    if value.list.s is None:
+      raise ValueError("Tried to set special '{}' attribute using "
+                       "tf.AttrValue object, and the object's 'list.s' "
+                       "attribute was not populated. Value: "
+                       "'{}'".format(_COLOCATION_ATTR_NAME, str(value)))
+    value = [tf.compat.as_str(s_i) for s_i in value.list.s]
+  elif not isinstance(value, list) and not isinstance(value, tuple):
+    raise ValueError("Tried to set special '{}' attribute with a type "
+                     "other than list or tuple. Type is '{}' and value "
+                     "is '{}'".format(_COLOCATION_ATTR_NAME, type(value),
+                                      str(value)))
+  ret = []
+  for elem in value:
+    if not elem.startswith(_COLOCATION_PREFIX):
+      raise ValueError("Tried to set special '{}' attribute with "
+                       "something other than a string starting with "
+                       "'{}' (value used: "
+                       "'{}')".format(_COLOCATION_ATTR_NAME,
+                                      _COLOCATION_PREFIX, elem))
+    ret.append(elem[len(_COLOCATION_PREFIX):])
+  return ret
+
+
+def _validate_output_shapes_attr(value: Any) -> List[tf.TensorShape]:
+  """
+  Validate a potential value for the special "_output_shapes" attribute.
+
+  Returns a list of output shapes extracted from the attribute value.
+  """
+  if isinstance(value, tf.AttrValue):
+    if value.list.shape is None:
+      raise ValueError("Tried to set special '{}' attribute using "
+                       "tf.AttrValue object, and the object's 'list.shape' "
+                       "attribute was not populated. Value: "
+                       "'{}'".format(_OUTPUT_SHAPES_ATTR_NAME, str(value)))
+    return [tf.TensorShape(shape_i) for shape_i in value.list.shape]
+  else:
+    raise ValueError("Tried to set special '{}' attribute with a type "
+                     "other than a tf.AttrValue. Type is '{}' and value "
+                     "is '{}'".format(_OUTPUT_SHAPES_ATTR_NAME, type(value),
+                                      str(value)))

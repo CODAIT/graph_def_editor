@@ -338,7 +338,7 @@ class _TmpInfo(object):
     self.scope_ = dst_scope
     self.transformed_ops = {}
     self.transformed_ts = {}
-    self.collections = dict((key, self.graph.get_collection(key))
+    self.collections = dict((key, self.graph.get_collection_by_name(key))
                             for key in self.graph.get_all_collection_keys())
     self.cyclic_ops = []
     self.transform_original_op_handler = transform_op_if_inside_handler
