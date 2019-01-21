@@ -36,7 +36,7 @@ class GraphTest(unittest.TestCase):
     # Remove the directory after the test.
     # Comment out this line to prevent deleting temps.
     shutil.rmtree(self.temp_dir)
-    pass
+    pass  # In case previous line gets commented out
 
   def test_import_saved_model(self):
     tf_g = tf.Graph()
