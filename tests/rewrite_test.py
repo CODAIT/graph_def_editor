@@ -80,7 +80,6 @@ class RewriteTest(unittest.TestCase):
     """
     temp_dir = tempfile.mkdtemp()
     try:
-      print("Temp dir is {}".format(temp_dir))
       tf_g = tf.Graph()
       with tf_g.as_default():
         input_tensor = tf.placeholder(dtype=tf.float32, shape=[32, 1],

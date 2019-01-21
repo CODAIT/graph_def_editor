@@ -26,6 +26,7 @@ import tempfile
 
 import graph_def_editor as gde
 
+
 class GraphTest(unittest.TestCase):
 
   def setUp(self):

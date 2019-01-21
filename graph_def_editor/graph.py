@@ -66,6 +66,7 @@ class SaverInfo(object):
     self.path = path
     self.saver_def = saver_def
 
+
 class SignatureInfo(object):
   """
   Object that encapsulates information about entry points to the graph,
@@ -92,7 +93,6 @@ class SignatureInfo(object):
   @property
   def signature_defs(self):
     return self._signature_defs
-
 
 
 class Graph(object):
@@ -163,8 +163,8 @@ class Graph(object):
     self._frame_name_to_nodes = None
     self._head_name_to_coloc_group = None  # Dict[str, FrozenList[str]]
     self._variable_name_to_variable = {}  # Dict[str, Variable]
-    self._collection_name_to_type = None # Dict[str, str], generated on demand
-    self._passthrough_collections = {} # Dict[str, List[CollectionDef]]
+    self._collection_name_to_type = None  # Dict[str, str], generated on demand
+    self._passthrough_collections = {}  # Dict[str, List[CollectionDef]]
     self._passthrough_saver = None
 
     # Load nodes in three passes because the g may contain cycles.
@@ -208,9 +208,9 @@ class Graph(object):
       g: Graph in which the node will be created
       node_def: Fully-populated NodeDef proto; all fields, including inputs,
         will be used.
-      set_inputs: Optional. If True, also populate the data and control inputs of
-        the returned Node. This operation will only work if the targets of those
-        inputs are already present in the graph.
+      set_inputs: Optional. If True, also populate the data and control inputs
+        of the returned Node. This operation will only work if the targets of
+        those inputs are already present in the graph.
     """
     ret = self.add_node(name=node_def.name, op_name=node_def.op)
     ret.device = node_def.device
@@ -682,7 +682,7 @@ class Graph(object):
 
     # The next field, "signature_def", contains information about
     # input/output signatures that this MetaGraph  supports.
-    for sig_name, sig_def  in self.signatures.items():
+    for sig_name, sig_def in self.signatures.items():
       meta_graph.signature_def[sig_name].CopyFrom(sig_def)
 
     # The final field, asset_file_def, stores information about additional
@@ -776,6 +776,7 @@ class Graph(object):
     for n in self.nodes:
       for name in n.collection_names:
         node_collection_names.add(name)
+
     def _add(names, type_name):
       for coll_name in names:
         if coll_name in self._collection_name_to_type:
@@ -1193,7 +1194,6 @@ def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
       raise NotImplementedError("Unexpected collection type {}".format(
         collection_type))
 
-
     ret.append(collection_proto)
   return ret
 
@@ -1224,6 +1224,7 @@ def _decode_tensor_name(tensor_name: str, error_msg: str):
 
   return node_name, output_ix
 
+
 def _duplicate_collection_error_str(name: str,
                                     passthrough_collection_names: Set[str],
                                     variable_collection_names: Set[str],
@@ -1242,6 +1243,7 @@ def _duplicate_collection_error_str(name: str,
   return (
     "Collection name '{}' maps to multiple collection types: "
     "{}".format(name, types))
+
 
 def _vars_dir_for_saved_model(saved_model_path: str) -> str:
   """
