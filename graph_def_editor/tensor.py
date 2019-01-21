@@ -70,9 +70,17 @@ class Tensor(object):
   def dtype(self) -> tf.DType:
     return self._dtype
 
+  @dtype.setter
+  def dtype(self, value: tf.DType):
+    self._dtype = value
+
   @property
-  def shape(self):
+  def shape(self) -> tf.TensorShape:
     return self._shape
+
+  @shape.setter
+  def shape(self, value: tf.TensorShape):
+    self._shape = value
 
   @property
   def graph(self):
