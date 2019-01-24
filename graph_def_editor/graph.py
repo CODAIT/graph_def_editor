@@ -242,7 +242,11 @@ class Graph(object):
     # The collection is stored in exactly one of five different formats.
     if collection.HasField("node_list"):
       for node_name in collection_def.value.node_list.value:
-        n = self.get_node_by_name(node_name)
+        # Check if node name is a Tensor type
+        if node_name.rfind(':') > -1:
+          n = self.get_tensor_by_name(node_name)
+        else:
+          n = self.get_node_by_name(node_name)
         n.add_to_collection(collection_name)
     elif collection.HasField("bytes_list"):
       for serialized_var in collection_def.value.bytes_list.value:
@@ -760,6 +764,9 @@ class Graph(object):
       for n in self.nodes:
         if name in n.collection_names:
           ret.append(n)
+      for t in self.tensors:
+        if name in t.collection_names:
+          ret.append(t)
       return ret
     else:
       raise ValueError("Unknown collection type '{}'".format(coll_type))
@@ -775,6 +782,9 @@ class Graph(object):
         variable_collection_names.add(name)
     for n in self.nodes:
       for name in n.collection_names:
+        node_collection_names.add(name)
+    for t in self.tensors:
+      for name in t.collection_names:
         node_collection_names.add(name)
 
     def _add(names, type_name):

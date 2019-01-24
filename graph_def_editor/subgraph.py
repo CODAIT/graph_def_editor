@@ -24,8 +24,10 @@ import copy
 import six
 from six import iteritems
 from six import StringIO
+import tensorflow as tf
 
 from graph_def_editor import select, util
+from graph_def_editor import graph as gde_graph
 
 __all__ = [
     "SubGraphView",
@@ -617,7 +619,7 @@ def _check_graph(sgv, graph):
     raise TypeError("Expected a SubGraphView, got: {}".format(type(graph)))
   if graph is None or not sgv.graph:
     return sgv
-  if not isinstance(graph, tf_ops.Graph):
+  if not isinstance(graph, gde_graph.Graph):
     raise TypeError("Expected a tf.Graph, got: {}".format(type(graph)))
   if sgv.graph is not graph:
     raise ValueError("Graph mismatch.")
