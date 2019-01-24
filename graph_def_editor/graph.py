@@ -241,7 +241,7 @@ class Graph(object):
     collection = collection_def.value
     # The collection is stored in exactly one of five different formats.
     if collection.HasField("node_list"):
-      for node_name in collection_def.value.node_list.value:
+      for node_name in collection.node_list.value:
         # Check if node name is a Tensor type
         if node_name.rfind(':') > -1:
           n = self.get_tensor_by_name(node_name)
@@ -249,7 +249,7 @@ class Graph(object):
           n = self.get_node_by_name(node_name)
         n.add_to_collection(collection_name)
     elif collection.HasField("bytes_list"):
-      for serialized_var in collection_def.value.bytes_list.value:
+      for serialized_var in collection.bytes_list.value:
         var = self.add_variable_from_variable_def(serialized_var,
                                                   skip_if_present=True)
         var.add_to_collection(collection_name)
