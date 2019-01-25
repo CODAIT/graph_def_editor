@@ -120,6 +120,99 @@ class GraphTest(unittest.TestCase):
         result = sess.run(result_tensor.name, {input_tensor.name: 1})
         self.assertEqual(result, -41)
 
+  def test_graph_collection_types(self):
+
+    # Build a graph with NodeList that has an operation and tensor,
+    # and ByteList with variable
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      y_ = tf.placeholder(tf.int64, [None])
+      x = tf.get_variable("x", [1])
+      with tf.name_scope('loss'):
+        cross_entropy = tf.losses.sparse_softmax_cross_entropy(labels=y_,
+                                                               logits=x)
+      with tf.name_scope('adam_optimizer'):
+        _ = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+
+    g = gde.Graph(tf_g)
+
+    keys = g.get_all_collection_keys()
+
+    # Check that loss tensor added to collection
+    self.assertIn('losses', keys)
+    t = g.get_tensor_by_name("loss/sparse_softmax_cross_entropy_loss/value:0")
+    self.assertIn('losses', t.collection_names)
+
+    # Check that variable added to collection
+    self.assertIn('variables', keys)
+    v = g.get_variable_by_name('x:0')
+    self.assertIn('variables', v.collection_names)
+
+    # Check that op added to collection
+    self.assertIn('train_op', keys)
+    n = g.get_node_by_name("adam_optimizer/Adam")
+    self.assertIn('train_op', n.collection_names)
+
+  def test_collection_roundtrip_savedmodel(self):
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      x = tf.placeholder(dtype=tf.float32, shape=[])
+      y = tf.placeholder(dtype=tf.float32, shape=[])
+      w = tf.Variable([1.0, 2.0], name="w")
+      c = tf.constant(0.0)
+      tf.add_to_collection('tensors', c)
+      y_model = tf.multiply(x, w[0]) + w[1] + c
+
+      error = tf.square(y - y_model)
+      train_op = tf.train.GradientDescentOptimizer(0.01).minimize(error)
+      model = tf.global_variables_initializer()
+
+      with tf.Session() as sess:
+        sess.run(model)
+        sess.run(train_op, feed_dict={x: 0.5, y: 1.0})
+        sess.run(w)
+        model_dir = self.temp_dir + "/saved_model"
+        tf.saved_model.simple_save(sess, model_dir,
+                                   inputs={"in": x},
+                                   outputs={"out": error})
+
+    expected_collections = ['variables', 'tensors', 'train_op']
+
+    # Checking for initial collections
+    for name in expected_collections:
+      self.assertIn(name, tf_g.collections)
+
+    # Load tf savedmodel with gde
+    g = gde.saved_model_to_graph(model_dir)
+
+    # Check collections are loaded from tf savedmodel
+    collections = g.get_all_collection_keys()
+    for name in expected_collections:
+      self.assertIn(name, collections)
+
+    # Check collections are assigned when loaded
+    w_gde = g.get_variable_by_name(w.name)
+    self.assertIn('variables', w_gde.collection_names)
+    c_gde = g.get_tensor_by_name(c.name)
+    self.assertIn('tensors', c_gde.collection_names)
+    train_op_gde = g.get_node_by_name(train_op.name)
+    self.assertIn('train_op', train_op_gde.collection_names)
+
+    # Use gde to write savedmodel
+    second_model_dir = self.temp_dir + "/saved_model_after"
+    g.to_saved_model(second_model_dir)
+
+    # Load gde savedmodel in tf session
+    after_tf_g = tf.Graph()
+    with after_tf_g.as_default():
+      with tf.Session() as sess:
+        tf.saved_model.load(sess, [tf.saved_model.tag_constants.SERVING],
+                            second_model_dir)
+
+    # Checking collections loaded back from gde savedmodel
+    for name in expected_collections:
+      self.assertIn(name, after_tf_g.collections)
+
 
 if __name__ == "__main__":
   unittest.main()

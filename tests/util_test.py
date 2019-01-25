@@ -180,6 +180,23 @@ class UtilTest(unittest.TestCase):
     self.assertEqual(ph1.name, "geph__a1_0")
     self.assertEqual(ph2.name, "geph")
 
+  def test_identity(self):
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      c = tf.constant(42)
+      i1 = tf.identity(c, name="identity_tf")
+
+    g = gde.Graph(tf_g)
+    i2 = gde.util.make_identity(g, "identity_gde", g.get_tensor_by_name(c.name))
+
+    with g.to_tf_graph().as_default():
+      with tf.Session() as sess:
+        result1 = sess.run(i1.name)
+        result2 = sess.run(i2.name)
+      # TODO: test fails
+      print(tf.get_default_graph().as_graph_def())
+    self.assertEqual(result1, result2)
+
 
 if __name__ == "__main__":
   unittest.TestCase.main()
