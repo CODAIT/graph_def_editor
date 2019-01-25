@@ -23,14 +23,18 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import numpy as np
 import tensorflow as tf
-from typing import Tuple, Dict, FrozenSet, Iterable, Union
+from typing import Tuple, Dict, FrozenSet, Iterable, Union, Callable
 
-from graph_def_editor import graph, node, util, tensor, variable
+from graph_def_editor import graph, node, reroute, tensor, util
 
+# Shorten select.TreeExpr to make patterns easier to read
+from graph_def_editor.select import TreeExpr
 
 __all__ = [
   "change_batch_size",
+  "fold_batch_norms",
 ]
 
 
@@ -74,7 +78,374 @@ def change_batch_size(g: graph.Graph,
   g.infer_shapes_and_dtypes()
 
 
+def _fixed_point_apply(pattern: TreeExpr,
+                       action: Callable[[graph.Graph, Dict[str, node.Node]],
+                                        bool],
+                       g: graph.Graph):
+  """
+  Repeatedly apply a pattern-action rule until the graph stops changing.
+
+  Args:
+    pattern: Expression that selects a portion of the graph for modification
+    action: Rule (as a Callable) that optionally modifies the graph. Returns
+      True if modifications occurred and False otherwise.
+  """
+  keep_going = True
+  while keep_going:
+    keep_going = False
+    # Each iteration walks through all the nodes of the graph to avoid O(n^2)
+    # behavior
+    nodes_before = g.nodes
+    for n in nodes_before:
+      if n.graph is None:
+        # Node has been removed from the graph.
+        continue
+      match_info = pattern.eval_from(n)
+      if match_info is not None:
+        # Found a structural match rooted at the current node. Perform action.
+        change_happened = action(g, match_info)
+        if change_happened:
+          keep_going = True
 
 
+def _add_scale_to_conv_weights(conv_node: node.Node,
+                               weights_node: node.Node,
+                               scale: np.ndarray):
+  """
+  Subroutine of fold_batch_norms() and fold_old_batch_norms().
+
+  Extract the weights from a Conv2D or MatMul op, multiply by scaling
+  factors, and put the resulting scaled weights in place.
+
+  Args:
+    conv_node: Conv2D/MatMul node to be rewritten
+    weights_node: Const node containing weights that parametrize the
+      transformation that conv_node performs.
+    scale: Array where each entry contains a scale factor for the
+      corresponding output column of conv_node
+  """
+  if conv_node.op_type not in ("Conv2D", "MatMul"):
+    raise ValueError("Unexpected op type {} for conv_node".format(
+      conv_node.op_type))
+  if weights_node.op_type != "Const":
+    raise ValueError("Unexpected op type {} for weights_node".format(
+      conv_node.op_type))
+
+  weights = weights_node.get_attr("value")
+
+  # Make sure all the inputs really are vectors, with as many entries as
+  # there are columns in the weights.
+  weights_cols_index = 3 if conv_node.op_type == "Conv2D" else 1
+  weights_cols = weights.shape[weights_cols_index]
+  if len(scale.shape) != 1 or scale.shape[0] != weights_cols:
+    raise ValueError("Scale constant input to batch norm has bad shape: "
+                     "{}".format(scale.shape))
+
+  # Multiply the original weights by the scale vector.
+  scaled_weights = weights.copy()
+  for col in range(weights_cols):
+    scaled_weights[..., col] *= scale[col]
+
+  # Modify the node in place
+  weights_node.replace_attr("value", scaled_weights)
 
 
+def fold_batch_norms(g: graph.Graph):
+  """
+  Python port of the Graph Transform Tool rewrite by the same name.
+
+  Identifies instances of the pattern `Conv2D => Mul` and folds the
+  multiplication into the convolution's filter coefficients. This pattern
+  occurs as a result of `Conv2D => BatchNorm` turning into
+  `Conv2D => Mul => Add` when a multi-op batch normalization is used.
+  """
+  pattern = TreeExpr(op="Mul", alias="mul", inputs=(
+    TreeExpr(op="Conv2D|MatMul", alias="conv", inputs=(
+      TreeExpr(),
+      TreeExpr(op="Const", alias="weights")
+    )),
+    TreeExpr(op="Const", alias="mul_values")))
+
+  def action(_, match_info: Dict[str, node.Node]) -> bool:
+    mul_node = match_info["mul"]
+    conv_node = match_info["conv"]
+    weights_node = match_info["weights"]
+    mul_values_node = match_info["mul_values"]
+
+    mul_values = mul_values_node.get_attr("value")
+
+    # If there is another direct consumer of the output of the convolution,
+    # skip the rewrite.
+    if len(conv_node.outputs[0].consumers()) > 1:
+      return False
+
+    _add_scale_to_conv_weights(conv_node, weights_node, mul_values)
+
+    # Cut the Mul node out of the graph
+    reroute.reroute_ts(mul_node.outputs[0], mul_node.inputs[0])
+    g.remove_node_by_name(mul_node.name)
+
+    # Const might still be in use; check before removing it.
+    if len(mul_values_node.outputs[0].consumers()) == 0:
+      g.remove_node_by_name(mul_values_node.name)
+
+    # Original rewrite gave the name of the Mul node to the Conv2D. Recreate
+    # that behavior here, including putting the node in the collections that
+    # the Mul node was a member of.
+    g.rename_node(conv_node.name, mul_node.name)
+    conv_node.remove_from_collections()
+    for collection_name in mul_node.collection_names:
+      conv_node.add_to_collection(collection_name)
+    return True
+
+  _fixed_point_apply(pattern, action, g)
+
+
+def fold_old_batch_norms(g: graph.Graph):
+  """
+  Python port of the Graph Transform Tool rewrite by the same name.
+
+  This rewrite looks for instances of the pattern `Conv2D => [batch norm]`,
+  where [batch norm] is a fused batch normalization operator.
+
+  The TF documentation says that this rewrite is only for graphs produced by
+  legacy code, but this is not true. As of January 2019, the most recent
+  version of TensorFlow produces fused batch normalization operators by default.
+
+  Specifically, legacy code uses the `BatchNormWithGlobalNormalization` op,
+  while new code uses the `FusedBatchNorm` op.
+
+  In addition to covering the basic `Conv2D => [batch norm]` pattern,
+  the rewrite also covers the cases where some postprocessing nodes exist
+  between the `Conv2D` and the `[batch norm]` parts. As a result, the rewrite
+  proceeds in three passes.
+  """
+  # Start by defining some useful subroutines.
+  def get_scale_and_offset(match_info: Dict[str, node.Node]):
+    """
+    Dig the batch normalization parameters out of a subgraph match and
+    compute scale and offset vectors that the normalization applies at
+    inference time.
+
+    Args:
+      match_info: Should contain ops under the following keys:
+        "batch_norm" ==> fused batch normalization op
+        "mean", "variance", "beta", "gamma" ==> Const nodes containing
+          normalization parameters
+
+    Returns:
+      scale, offset: Two Numpy arrays containing the scale and offset vectors
+    """
+    batch_norm_node = match_info["batch_norm"]
+    mean_node = match_info["mean"]
+    variance_node = match_info["variance"]
+    beta_node = match_info["beta"]
+    gamma_node = match_info["gamma"]
+
+    if batch_norm_node.op_type == "FusedBatchNorm":
+      # FusedBatchNorm always scales after normalization.
+      scale_after_normalization = True
+      variance_epsilon = batch_norm_node.get_attr("epsilon")
+    else:
+      scale_after_normalization = batch_norm_node.get_attr(
+        "scale_after_normalization")
+      variance_epsilon = batch_norm_node.get_attr("variance_epsilon")
+    mean = mean_node.get_attr("value")
+    variance = variance_node.get_attr("value")
+    beta = beta_node.get_attr("value")
+    gamma = gamma_node.get_attr("value")
+
+    # Sanity check: Everything should have the same 1-D shape
+    mean_shape = mean.shape
+    if len(mean_shape) != 1:
+      raise ValueError("Shape of mean ({}) is not a vector".format(mean_shape))
+    if (variance.shape != mean_shape or beta.shape != mean_shape or
+            gamma.shape != mean_shape):
+      raise ValueError("Shapes {}, {}, {}, and {} for mean, variance, beta, "
+                       "and gamma don't all match"
+                       "".format(mean.shape, variance.shape, beta.shape,
+                                 gamma.shape))
+
+    # Now we have everything we need to compute scale and offset values.
+    if scale_after_normalization:
+      scale = (1.0 / np.sqrt(variance + variance_epsilon)) * gamma
+      offset = np.zeros(shape=mean_shape, dtype=np.float32)
+    else:
+      scale = (1.0 / np.sqrt(variance + variance_epsilon))
+      offset = (-mean * scale) + beta
+
+    return scale, offset
+
+  def replace_batch_norm_with_bias_add(match_info: Dict[str, node.Node],
+                                       offset: np.ndarray,
+                                       data_format: str):
+    """
+    Replace the fused batch normalization node in the graph with a BiasAdd
+    node that applies the offset from the original normalization.
+    Then remove the batch normalization node and its input constants.
+
+    Args:
+      match_info: Should contain ops under the following keys:
+        "batch_norm" ==> fused batch normalization op
+        "mean", "variance", "beta", "gamma" ==> Const nodes containing
+          normalization parameters
+      offset: Offset that the batch norm node applies at inference time
+      data_format: Data format string, i.e. "NHWC" or "NCHW"; or None if the
+        original convolution didn't specify.
+    """
+    batch_norm_node = match_info["batch_norm"]
+
+    bias_offset_node = util.make_const(g, batch_norm_node.name + "_offset",
+                                       offset, uniquify_name=True)
+    bias_add_node = g.add_node(batch_norm_node.name + "_bias_add", "BiasAdd",
+                               uniquify_name=True)
+
+    if data_format is not None:
+      bias_add_node.add_attr("data_format", data_format)
+    bias_add_node.add_attr("T", batch_norm_node.get_attr("T"))
+    bias_add_node.set_inputs([batch_norm_node.inputs[0], bias_offset_node])
+
+    # Splice the batch norm op out of the graph and replace with a newly
+    # created BiasAdd node.
+    reroute.reroute_ts(batch_norm_node.outputs, bias_add_node.outputs)
+    g.remove_node_by_name(batch_norm_node.name)
+
+    # Original rewrite gave the name of the batch norm node to the BiasAdd.
+    # Recreate that behavior here, including putting the node in the
+    # collections that the original node was a member of.
+    g.rename_node(bias_add_node.name, batch_norm_node.name)
+    for collection_name in batch_norm_node.collection_names:
+      bias_add_node.add_to_collection(collection_name)
+
+    # Remove the input constants if they are no longer used.
+    for key in ("mean", "variance", "beta", "gamma"):
+      n = match_info[key]
+      if len(n.output[0].consumers()) == 0:
+        g.remove_node_by_name(n.name)
+
+  # Now we perform three passes to cover three different types of subgraph.
+  # PASS 1: Simple Conv2D => [batch norm] pattern.
+  pattern_1 = TreeExpr(
+    op="BatchNormWithGlobalNormalization|FusedBatchNorm",
+    alias="batch_norm", inputs=(
+      TreeExpr(op="Conv2D", alias="conv", inputs=(
+          TreeExpr(),
+          TreeExpr(op="Const", alias="weights")
+        )),
+      TreeExpr(op="Const", alias="mean"),
+      TreeExpr(op="Const", alias="variance"),
+      TreeExpr(op="Const", alias="beta"),
+      TreeExpr(op="Const", alias="gamma"),
+    ))
+
+  def action_1(_, match_info: Dict[str, node.Node]) -> bool:
+    conv_node = match_info["conv"]
+    weights_node = match_info["weights"]
+
+    # If there is another direct consumer of the output of the convolution,
+    # skip the rewrite.
+    if len(conv_node.outputs[0].consumers()) > 1:
+      return False
+
+    scale, offset = get_scale_and_offset(match_info)
+    _add_scale_to_conv_weights(conv_node, weights_node, scale)
+    data_format = conv_node.get_attr("data_format") if conv_node.has_attr(
+      "data_format") else None
+    replace_batch_norm_with_bias_add(match_info, offset, data_format)
+    return True
+
+  _fixed_point_apply(pattern_1, action_1, g)
+
+  # PASS 2: Conv2D => BatchToSpaceND => [batch norm]
+  pattern_2 = TreeExpr(
+    op="BatchNormWithGlobalNormalization|FusedBatchNorm",
+    alias="batch_norm", inputs=(
+      TreeExpr(op="BatchToSpaceND", alias="batch_to_space", inputs=(
+        TreeExpr(op="Conv2D", alias="conv", inputs=(
+          TreeExpr(),
+          TreeExpr(op="Const", alias="weights")
+        )))),
+      TreeExpr(op="Const", alias="mean"),
+      TreeExpr(op="Const", alias="variance"),
+      TreeExpr(op="Const", alias="beta"),
+      TreeExpr(op="Const", alias="gamma"),
+    ))
+
+  def action_2(_, match_info: Dict[str, node.Node]) -> bool:
+    conv_node = match_info["conv"]
+    weights_node = match_info["weights"]
+
+    # If there is another direct consumer of the output of the convolution,
+    # or the BatchToSpace, skip the rewrite
+    if len(conv_node.outputs[0].consumers()) > 1:
+      return False
+    if len(match_info["batch_to_space"].outputs[0].consumers()) > 1:
+      return False
+
+    scale, offset = get_scale_and_offset(match_info)
+    _add_scale_to_conv_weights(conv_node, weights_node, scale)
+    data_format = conv_node.get_attr("data_format") if conv_node.has_attr(
+      "data_format") else None
+    replace_batch_norm_with_bias_add(match_info, offset, data_format)
+    return True
+
+  _fixed_point_apply(pattern_2, action_2, g)
+
+  # PASS 3: Two Conv2D's -> Concat -> [batch norm]
+  pattern_3 = TreeExpr(
+    op="BatchNormWithGlobalNormalization|FusedBatchNorm",
+    alias="batch_norm", inputs=(
+      TreeExpr(op="ConcatV2|Concat", inputs=(
+        TreeExpr(op="Conv2D", alias="conv0", inputs=(
+          TreeExpr(),
+          TreeExpr(op="Const", alias="weights0")
+        )),
+        TreeExpr(op="Conv2D", alias="conv1", inputs=(
+          TreeExpr(),
+          TreeExpr(op="Const", alias="weights1")
+        )),
+        TreeExpr(op="Const", alias="axis")
+      )),
+      TreeExpr(op="Const", alias="mean"),
+      TreeExpr(op="Const", alias="variance"),
+      TreeExpr(op="Const", alias="beta"),
+      TreeExpr(op="Const", alias="gamma"),
+    ))
+
+  def action_3(_, match_info: Dict[str, node.Node]) -> bool:
+    # If there is another direct consumer of anything between a conv and the
+    # final output, skip the rewrite
+    if len(match_info["conv0"].outputs[0].consumers()) > 1:
+      return False
+    if len(match_info["conv1"].outputs[0].consumers()) > 1:
+      return False
+    if len(match_info["concat"].outputs[0].consumers()) > 1:
+      return False
+
+    conv0_node = match_info["conv0"]
+    conv1_node = match_info["conv1"]
+    weights0_node = match_info["weights0"]
+    weights1_node = match_info["weights1"]
+
+    scale, offset = get_scale_and_offset(match_info)
+
+    axis = match_info["axis"].get_attr("value")
+    if axis == 3:
+      # Concatenating along channel axis ==> Need to split scale and offset
+      split_cols = weights0_node.get_attr("value").shape[3]
+      scale_0, offset_0 = scale[:split_cols], offset[:split_cols]
+      scale_1, offset_1 = scale[split_cols:], offset[split_cols:]
+    else:
+      # Concatenating along axis other than channel ==> Scale every channel
+      scale_0, offset_0 = scale, offset
+      scale_1, offset_1 = scale, offset
+
+    _add_scale_to_conv_weights(conv0_node, weights0_node, scale_0)
+    _add_scale_to_conv_weights(conv1_node, weights1_node, scale_1)
+
+    data_format = conv0_node.get_attr("data_format") if conv0_node.has_attr(
+      "data_format") else None
+    replace_batch_norm_with_bias_add(match_info, offset, data_format)
+    return True
+
+  _fixed_point_apply(pattern_3, action_3)

@@ -63,6 +63,7 @@ class Node(object):
         should be located. Default value of "" means "use the default device"
     """
     self._graph = g
+    self._ex_graph = None  # graph.Graph
     self._id = node_id
     self._name = name
     self._op_name = op_name
@@ -84,6 +85,17 @@ class Node(object):
        Unique name of the node that this Node represents
     """
     return self._name
+
+  def change_name(self, new_name: str):
+    """
+    THIS METHOD SHOULD ONLY BE CALLED BY THE PARENT GRAPH
+
+    Changes this node's `name` attribute WITHOUT UPDATING THE PARENT GRAPH.
+
+    Args:
+      new_name: New value for the `name` attribute.
+    """
+    self._name = new_name
 
   @property
   def op_type(self) -> str:
@@ -120,8 +132,20 @@ class Node(object):
     """
     return self._id
 
+  def remove_from_graph(self):
+    """
+    THIS METHOD TO BE CALLED ONLY BY THE PARENT GRAPH.
+
+    Sets this node's graph pointer to None. DOES NOT UPDATE POINTERS TO THIS
+    NODE FROM THE PARENT GRAPH.
+    """
+    self._ex_graph = self._graph
+    self._graph = None
+    # Don't need to update output tensors because they don't store a pointer
+    # to the graph, only to the node
+
   @property
-  def outputs(self):
+  def outputs(self) -> Tuple[tensor.Tensor]:
     """
     Returns:
       Tuple (i.e. immutable list) of `gde.Tensor` objects representing the
@@ -412,6 +436,15 @@ class Node(object):
     else:
       return ret
 
+  def has_attr(self, key: str) -> bool:
+    """
+    Args:
+      key: String name of a potential attribute
+
+    Returns True if the node has an attribute under the indicated key
+    """
+    return key in self._attributes
+
   def get_attr_keys(self) -> Tuple[str]:
     """
     Returns:
@@ -654,6 +687,12 @@ class Node(object):
     # Invalidate any information the parent graph may have cached about
     # collections.
     self._graph.increment_version_counter()
+
+  def remove_from_collections(self):
+    """
+    Remove this node from amy collections that it is currently a member of.
+    """
+    self._collection_names.clear()
 
 
 ################################################################################

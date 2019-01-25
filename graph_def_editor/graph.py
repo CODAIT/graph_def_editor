@@ -297,6 +297,9 @@ class Graph(object):
     Returns true if the graph has a node by the indicated name. Exact string
     match.
     """
+    if not isinstance(name, str):
+      raise ValueError("Node name argument is not a string, but is of type "
+                       "{}".format(type(name)))
     return name in self._node_name_to_node.keys()
 
   def add_node(self, name: str, op_name: str, uniquify_name: bool = False) -> \
@@ -360,6 +363,43 @@ class Graph(object):
 
     # Don't need to increment version counter; add_node() already did that.
     return ret
+
+  def remove_node_by_name(self, name: str):
+    """
+    Removes the indicated node from this graph and from any collections in
+    this graph.
+
+    The caller is responsible for removing all links to the indicated node
+    prior to making this call.
+
+    Args:
+      name: name of the node to remove
+    """
+    n = self.get_node_by_name(name)
+    n.remove_from_graph()
+    del self._node_name_to_node[name]
+    self.increment_version_counter()
+    # Don't need to update collection info because collection membership is
+    # stored in the node.
+    # Don't need to update consumers of tensors because that information is
+    # calculated dynamically by iterating over nodes.
+
+  def rename_node(self, old_name, new_name):
+    """
+    Change the name of a node in the graph.
+
+    Args:
+      old_name: Name of an existing node
+      new_name: New name for the node in question. Must not currently be in use.
+    """
+    if self.contains_node(new_name):
+      raise ValueError("Graph already has a node under name '{}'".format(
+        new_name))
+    n = self.get_node_by_name(old_name)
+    n.change_name(new_name)
+    del self._node_name_to_node[old_name]
+    self._node_name_to_node[new_name] = n
+    self.increment_version_counter()
 
   def add_variable(self, name: str) -> variable.Variable:
     """
@@ -1007,6 +1047,7 @@ class Graph(object):
     this map will be reflected in this object.
     """
     return self._signatures.signature_defs
+
 
 
 def saved_model_to_graph(saved_model_path: str, tag: str = None,

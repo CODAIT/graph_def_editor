@@ -97,7 +97,6 @@ class Tensor(object):
     for n in self.graph.nodes:
       if self in n.inputs:
         ret.append(n)
-
     return ret
 
   @property
