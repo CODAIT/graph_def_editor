@@ -1085,6 +1085,7 @@ def saved_model_to_graph(saved_model_path: str, tag: str = None,
     collection_proto.key = collection_name
     collection_proto.value.CopyFrom(
       meta_graph.collection_def[collection_name])
+    collections.append(collection_proto)
   if include_saver and meta_graph.HasField("saver_def"):
     saver_info = SaverInfo(_vars_dir_for_saved_model(saved_model_path),
                            meta_graph.saver_def)
