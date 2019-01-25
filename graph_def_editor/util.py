@@ -750,5 +750,5 @@ def make_identity(g: 'graph.Graph', name: str, input: 'tensor.Tensor',
   ret = g.add_node(name, "Identity", uniquify_name=uniquify_name)
   ret.set_inputs([input])
   ret.set_outputs_from_pairs([(input.dtype, input.shape)])
-  ret.add_attr("T", ("type", input.dtype))
+  ret.add_attr("T", input.dtype)
   return ret
