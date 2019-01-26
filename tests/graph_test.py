@@ -213,6 +213,18 @@ class GraphTest(unittest.TestCase):
     for name in expected_collections:
       self.assertIn(name, after_tf_g.collections)
 
+  def test_node_collection_type_unique(self):
+    g = gde.Graph()
+    a = g.add_node("a", "a_op")
+    a.set_outputs_from_pairs([(tf.int32, tf.TensorShape([]))])
+    a.add_to_collection("mixed_collection")
+    b = g.add_node("b", "b_op")
+    b.set_outputs_from_pairs([(tf.int32, tf.TensorShape([]))])
+    t = b.outputs[0]
+    t.add_to_collection("mixed_collection")
+    with self.assertRaisesRegex(TypeError, "Node collections cannot be Nodes and Tensors.*"):
+      g.get_collection_by_name("mixed_collection")
+
 
 if __name__ == "__main__":
   unittest.main()

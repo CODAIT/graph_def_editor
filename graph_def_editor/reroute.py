@@ -493,3 +493,4 @@ def add_control_inputs(op, cops):
       raise ValueError("{} is already a control_input of {}".format(cop.name,
                                                                     op.name))
   op.set_control_inputs(itertools.chain(op.control_inputs, cops))
+  op.graph.increment_version_counter()

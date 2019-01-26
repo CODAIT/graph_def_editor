@@ -187,13 +187,13 @@ class UtilTest(unittest.TestCase):
       i1 = tf.identity(c, name="identity_tf")
 
     g = gde.Graph(tf_g)
-    i2 = gde.util.make_identity(g, "identity_gde", g.get_tensor_by_name(c.name))
+    i2_node = gde.util.make_identity(g, "identity_gde", g.get_tensor_by_name(c.name))
+    i2 = i2_node.outputs[0]
 
     with g.to_tf_graph().as_default():
       with tf.Session() as sess:
         result1 = sess.run(i1.name)
         result2 = sess.run(i2.name)
-      # TODO: test fails
       print(tf.get_default_graph().as_graph_def())
     self.assertEqual(result1, result2)
 
