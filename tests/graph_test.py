@@ -213,6 +213,14 @@ class GraphTest(unittest.TestCase):
     for name in expected_collections:
       self.assertIn(name, after_tf_g.collections)
 
+    # Check that collections have expected contents after tf.saved_model.load
+    variable_collection_names = [v.name for v in after_tf_g.get_collection('variables')]
+    self.assertIn(w_gde.name, variable_collection_names)
+    tensors_collection_names = [t.name for t in after_tf_g.get_collection('tensors')]
+    self.assertIn(c.name, tensors_collection_names)
+    op_collection_names = [o.name for o in after_tf_g.get_collection('train_op')]
+    self.assertIn(train_op.name, op_collection_names)
+
   def test_node_collection_type_unique(self):
     g = gde.Graph()
     a = g.add_node("a", "a_op")
