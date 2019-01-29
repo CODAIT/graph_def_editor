@@ -194,7 +194,6 @@ class UtilTest(unittest.TestCase):
       with tf.Session() as sess:
         result1 = sess.run(i1.name)
         result2 = sess.run(i2.name)
-      print(tf.get_default_graph().as_graph_def())
     self.assertEqual(result1, result2)
 
 
