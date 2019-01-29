@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""SubGraphView: a subgraph view on an existing tf.Graph.
+"""SubGraphView: a subgraph view on an existing gde.Graph.
 """
 
 from __future__ import absolute_import
@@ -24,8 +24,10 @@ import copy
 import six
 from six import iteritems
 from six import StringIO
+import tensorflow as tf
 
 from graph_def_editor import select, util
+from graph_def_editor import graph as gde_graph
 
 __all__ = [
     "SubGraphView",
@@ -69,12 +71,12 @@ def _check_within_range(mapping, n, repetition):
 
 
 class SubGraphView(object):
-  """A subgraph view on an existing `tf.Graph`.
+  """A subgraph view on an existing `gde.Graph`.
 
-  An instance of this class is a subgraph view on an existing `tf.Graph`.
-  "subgraph" means that it can represent part of the whole `tf.Graph`.
+  An instance of this class is a subgraph view on an existing `gde.Graph`.
+  "subgraph" means that it can represent part of the whole `gde.Graph`.
   "view" means that it only provides a passive observation and do not to act
-  on the `tf.Graph`. Note that in this documentation, the term "subgraph" is
+  on the `gde.Graph`. Note that in this documentation, the term "subgraph" is
   often used as substitute to "subgraph view".
 
   A subgraph contains:
@@ -103,7 +105,7 @@ class SubGraphView(object):
   The input and output tensors can be remapped. For instance, some input tensor
   can be omitted. For instance, a subgraph representing an operation with two
   inputs can be remapped to only take one input. Note that this does not change
-  at all the underlying `tf.Graph` (remember, it is a view). It means that
+  at all the underlying `gde.Graph` (remember, it is a view). It means that
   the other input is being ignored, or is being treated as "given".
   The analogy with functions can be extended like this: F(x,y) is the original
   function. Remapping the inputs from [x, y] to just [x] means that the subgraph
@@ -111,7 +113,7 @@ class SubGraphView(object):
 
   The output tensors can also be remapped. For instance, some output tensor can
   be omitted. Other output tensor can be duplicated as well. As mentioned
-  before, this does not change at all the underlying `tf.Graph`.
+  before, this does not change at all the underlying `gde.Graph`.
   The analogy with functions can be extended like this: F(...)->x,y is the
   original function. Remapping the outputs from [x, y] to just [y,y] means that
   the subgraph now represent the function M(F(...)) where M is the function
@@ -156,7 +158,7 @@ class SubGraphView(object):
   to be used like an immutable python object.
 
   A common problem when using views is that they can get out-of-sync with the
-  data they observe (in this case, a `tf.Graph`). This is up to the user to
+  data they observe (in this case, a `gde.Graph`). This is up to the user to
   ensure that this doesn't happen. To keep on the safe side, it is recommended
   that the life time of subgraph views are kept very short. One way to achieve
   this is to use subgraphs within a "with make_sgv(...) as sgv:" Python context.
@@ -164,7 +166,7 @@ class SubGraphView(object):
   To alleviate the out-of-sync problem, some functions are granted the right to
   modified subgraph in place. This is typically the case of graph manipulation
   functions which, given some subgraphs as arguments, can modify the underlying
-  `tf.Graph`. Since this modification is likely to render the subgraph view
+  `gde.Graph`. Since this modification is likely to render the subgraph view
   invalid, those functions can modify the argument in place to reflect the
   change. For instance, calling the function swap_inputs(svg0, svg1) will modify
   svg0 and svg1 in place to reflect the fact that their inputs have now being
@@ -215,7 +217,7 @@ class SubGraphView(object):
     """Create a copy of this subgraph.
 
     Note that this class is a "view", copying it only create another view and
-    does not copy the underlying part of the `tf.Graph`.
+    does not copy the underlying part of the `gde.Graph`.
 
     Returns:
       A new identical instance of the original subgraph view.
@@ -253,7 +255,7 @@ class SubGraphView(object):
     """Return a copy of itself.
 
     Note that this class is a "view", copying it only create another view and
-    does not copy the underlying part of the tf.Graph.
+    does not copy the underlying part of the gde.Graph.
 
     Returns:
       A new instance identical to the original one.
@@ -364,7 +366,7 @@ class SubGraphView(object):
     If the inputs of the original subgraph are [t0, t1, t2], remapping to [2,0]
     will create a new instance whose inputs is [t2, t0].
 
-    Note that this is only modifying the view: the underlying `tf.Graph` is not
+    Note that this is only modifying the view: the underlying `gde.Graph` is not
     affected.
 
     Args:
@@ -387,7 +389,7 @@ class SubGraphView(object):
     If the output of the original subgraph are [t0, t1, t2], remapping to
     [1,1,0] will create a new instance whose outputs is [t1, t1, t0].
 
-    Note that this is only modifying the view: the underlying tf.Graph is not
+    Note that this is only modifying the view: the underlying gde.Graph is not
     affected.
 
     Args:
@@ -407,7 +409,7 @@ class SubGraphView(object):
   def remap(self, new_input_indices=None, new_output_indices=None):
     """Remap the inputs and outputs of the subgraph.
 
-    Note that this is only modifying the view: the underlying tf.Graph is not
+    Note that this is only modifying the view: the underlying gde.Graph is not
     affected.
 
     Args:
@@ -480,7 +482,7 @@ class SubGraphView(object):
 
   @property
   def graph(self):
-    """The underlying `tf.Graph`."""
+    """The underlying `gde.Graph`."""
     return self._graph
 
   @property
@@ -609,7 +611,7 @@ def _check_graph(sgv, graph):
     The SubGraphView sgv.
   Raises:
     TypeError: if sgv is not a SubGraphView or if graph is not None and not
-      a tf.Graph.
+      a gde.Graph.
     ValueError: if the graph of sgv and the given graph are not None and
       different.
   """
@@ -617,8 +619,8 @@ def _check_graph(sgv, graph):
     raise TypeError("Expected a SubGraphView, got: {}".format(type(graph)))
   if graph is None or not sgv.graph:
     return sgv
-  if not isinstance(graph, tf_ops.Graph):
-    raise TypeError("Expected a tf.Graph, got: {}".format(type(graph)))
+  if not isinstance(graph, gde_graph.Graph):
+    raise TypeError("Expected a gde.Graph, got: {}".format(type(graph)))
   if sgv.graph is not graph:
     raise ValueError("Graph mismatch.")
   return sgv
@@ -636,8 +638,8 @@ def make_view(*args, **kwargs):
   Returns:
     A subgraph view.
   Raises:
-    TypeError: if the optional keyword argument graph is not a `tf.Graph`
-      or if an argument in args is not an (array of) `tf.Tensor`
+    TypeError: if the optional keyword argument graph is not a `gde.Graph`
+      or if an argument in args is not an (array of) `gde.Tensor`
       or an (array of) `tf.Operation` or a string or a regular expression.
     ValueError: if one of the keyword arguments is unexpected.
   """
@@ -658,7 +660,7 @@ def make_view_from_scope(scope, graph):
 
   Args:
     scope: the name of the scope.
-    graph: the `tf.Graph`.
+    graph: the `gde.Graph`.
   Returns:
     A subgraph view representing the given scope.
   """

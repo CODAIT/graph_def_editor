@@ -730,3 +730,25 @@ def make_placeholder(g: 'graph.Graph', name: str, dtype: tf.DType,
   ret.add_attr("dtype", dtype)
   ret.set_outputs_from_pairs([(dtype, shape)])
   return ret
+
+
+def make_identity(g: 'graph.Graph', name: str, input: 'tensor.Tensor',
+                  uniquify_name: bool = False):
+  """
+  Convenience method to add an `Identity` op to a `gde.Graph`.
+
+  Args:
+    g: The graph that the new node should be added to
+    name: Name for the new node
+    input: `tensor.Tensor` Input Tensor to be returned by the identity op
+    uniquify_name: if True, generate unique names by appending a numeric
+      suffix in the event of a name collision. Otherwise name collisions
+      result in an error.
+
+  Returns `gde.Node` object representing the new node.
+  """
+  ret = g.add_node(name, "Identity", uniquify_name=uniquify_name)
+  ret.set_inputs([input])
+  ret.set_outputs_from_pairs([(input.dtype, input.shape)])
+  ret.add_attr("T", input.dtype)
+  return ret

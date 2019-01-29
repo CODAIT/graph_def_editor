@@ -14,6 +14,7 @@
 # ==============================================================================
 
 import tensorflow as tf
+from typing import AbstractSet
 
 __all__ = [
   "Tensor",
@@ -39,6 +40,7 @@ class Tensor(object):
     self._index = index
     self._dtype = dtype
     self._shape = shape
+    self._collection_names = set()  # Set[str]
 
   def __str__(self):
     return "Tensor '{}' (dtype {}, shape {})".format(self.name, self.dtype,
@@ -109,3 +111,23 @@ class Tensor(object):
       A TensorFlow-like tensor name string in the form "<op>:<output index>"
     """
     return "{}:{}".format(self.node.name, self.value_index)
+
+  @property
+  def collection_names(self) -> AbstractSet[str]:
+    """
+    Returns the names of all collections this tensor is a member of in the
+    parent graph.
+    """
+    return frozenset(self._collection_names)
+
+  def add_to_collection(self, collection_name: str):
+    """
+    Add the tensor to the indicated collection.
+    """
+    if collection_name in self._collection_names:
+      raise ValueError("Tensor '{}' already in collection '{}'".format(
+        self.name, collection_name))
+    self._collection_names.add(collection_name)
+    # Invalidate any information the parent graph may have cached about
+    # collections.
+    self.node._graph.increment_version_counter()
