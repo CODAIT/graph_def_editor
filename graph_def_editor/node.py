@@ -76,7 +76,7 @@ class Node(object):
     self._collection_names = set()  # Set[str]
 
   def __repr__(self):
-    return "Node[{}]".format(self.name)
+    return "Node[{}|{}]".format(self.name, self.op_type)
 
   @property
   def name(self) -> str:
@@ -153,10 +153,10 @@ class Node(object):
       the underlying node is mutable and gets edited.
     """
     if self._outputs is None:
-      raise ValueError("Outputs have not been set")
+      raise ValueError("Outputs of {} have not been set".format(self))
     return tuple(self._outputs)
 
-  def output(self, index: int):
+  def output(self, index: int) -> tensor.Tensor:
     """
     Args:
       index: Index of an output of the node
@@ -490,6 +490,7 @@ class Node(object):
     elif key in self._attr_names():
       raise ValueError("Already have an attribute called '{}'".format(key))
     else:
+      # Make sure attributes appear in protobuf in the order added
       self._attributes.append((key, value))
 
   def _update_shapes(self, new_shapes: List[tf.TensorShape]):

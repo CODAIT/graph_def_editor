@@ -25,7 +25,7 @@ from __future__ import print_function
 
 import numpy as np
 import tensorflow as tf
-from typing import Tuple, Dict, FrozenSet, Iterable, Union, Callable
+from typing import Tuple, Dict, Iterable, Union, Callable, Any
 
 from graph_def_editor import graph, node, reroute, tensor, util
 
@@ -146,6 +146,9 @@ def _add_scale_to_conv_weights(conv_node: node.Node,
   for col in range(weights_cols):
     scaled_weights[..., col] *= scale[col]
 
+  # Cast down to the original precision
+  scaled_weights = scaled_weights.astype(weights.dtype)
+
   # Modify the node in place
   weights_node.replace_attr("value", scaled_weights)
 
@@ -221,6 +224,48 @@ def fold_old_batch_norms(g: graph.Graph):
   proceeds in three passes.
   """
   # Start by defining some useful subroutines.
+  def get_batch_norm_params(
+          batch_norm_node: node.Node) -> Tuple[np.ndarray, np.ndarray,
+                                               np.ndarray, np.ndarray,
+                                               Any, bool]:
+    """
+    Delve into the inputs of a fused batch normalization node and fetch the
+    constant values for the descriptive statistics that define the
+    normalization.
+
+    Args:
+      batch_norm_node: The fused batch normalization op. The caller is
+      responsible for ensuring that the variable inputs to this op have been
+      converted to consts.
+
+    Returns:
+      The following values:
+        mean, variance, beta, gamma, variance_epsilon,
+        scale_after_normalization
+      The first four return values contain descriptive stats, cast to float64,
+      while the last is a Boolean value.
+    """
+    def get_const_values():
+      return (np.float64(batch_norm_node.inputs[ix].node.get_attr("value"))
+              for ix in range(1, 5))
+
+    # Compensate for different input orders and attribute names
+    if "BatchNormWithGlobalNormalization" == batch_norm_node.op_type:
+      mean, variance, beta, gamma = get_const_values()
+      variance_epsilon = np.float64(batch_norm_node.get_attr(
+        "variance_epsilon"))
+      scale_after_normalization = bool(batch_norm_node.get_attr(
+        "scale_after_normalization"))
+    elif "FusedBatchNorm" == batch_norm_node.op_type:
+      gamma, beta, mean, variance = get_const_values()
+      variance_epsilon = np.float64(batch_norm_node.get_attr("epsilon"))
+      scale_after_normalization = True
+    else:
+      raise ValueError("Unexpected op type {} for fused batch norm".format(
+        batch_norm_node.op_type))
+    return (mean, variance, beta, gamma, variance_epsilon,
+            scale_after_normalization)
+
   def get_scale_and_offset(match_info: Dict[str, node.Node]):
     """
     Dig the batch normalization parameters out of a subgraph match and
@@ -235,25 +280,11 @@ def fold_old_batch_norms(g: graph.Graph):
 
     Returns:
       scale, offset: Two Numpy arrays containing the scale and offset vectors
+        of 64-bit floating point numbers
     """
     batch_norm_node = match_info["batch_norm"]
-    mean_node = match_info["mean"]
-    variance_node = match_info["variance"]
-    beta_node = match_info["beta"]
-    gamma_node = match_info["gamma"]
-
-    if batch_norm_node.op_type == "FusedBatchNorm":
-      # FusedBatchNorm always scales after normalization.
-      scale_after_normalization = True
-      variance_epsilon = batch_norm_node.get_attr("epsilon")
-    else:
-      scale_after_normalization = batch_norm_node.get_attr(
-        "scale_after_normalization")
-      variance_epsilon = batch_norm_node.get_attr("variance_epsilon")
-    mean = mean_node.get_attr("value")
-    variance = variance_node.get_attr("value")
-    beta = beta_node.get_attr("value")
-    gamma = gamma_node.get_attr("value")
+    (mean, variance, beta, gamma, variance_epsilon,
+     scale_after_normalization) = get_batch_norm_params(batch_norm_node)
 
     # Sanity check: Everything should have the same 1-D shape
     mean_shape = mean.shape
@@ -269,16 +300,30 @@ def fold_old_batch_norms(g: graph.Graph):
     # Now we have everything we need to compute scale and offset values.
     if scale_after_normalization:
       scale = (1.0 / np.sqrt(variance + variance_epsilon)) * gamma
-      offset = np.zeros(shape=mean_shape, dtype=np.float32)
     else:
       scale = (1.0 / np.sqrt(variance + variance_epsilon))
-      offset = (-mean * scale) + beta
+    offset = (-mean * scale) + beta
 
     return scale, offset
 
+  def build_bias_add(node_name: str, t_attr: tf.AttrValue,
+                     offset: np.ndarray, data_format: str,
+                     input_tensor: tensor.Tensor,
+                     output_dtype: tf.DType,
+                     output_shape: tf.TensorShape):
+    # TODO(frreiss): Support non-32-bit offsets
+    bias_offset_node = util.make_const(g, node_name + "_offset",
+                                       np.float32(offset), uniquify_name=True)
+    bias_add_node = g.add_node(node_name, "BiasAdd", uniquify_name=True)
+    if data_format is not None:
+      bias_add_node.add_attr("data_format", data_format)
+    bias_add_node.add_attr("T", t_attr)
+    bias_add_node.set_inputs([input_tensor, bias_offset_node])
+    bias_add_node.set_outputs_from_pairs([(output_dtype, output_shape)])
+    return bias_add_node
+
   def replace_batch_norm_with_bias_add(match_info: Dict[str, node.Node],
-                                       offset: np.ndarray,
-                                       data_format: str):
+                                       offset: np.ndarray):
     """
     Replace the fused batch normalization node in the graph with a BiasAdd
     node that applies the offset from the original normalization.
@@ -287,27 +332,31 @@ def fold_old_batch_norms(g: graph.Graph):
     Args:
       match_info: Should contain ops under the following keys:
         "batch_norm" ==> fused batch normalization op
+        "conv" ==> Convolution or matmul op that feeds into the batch
+          normalization
         "mean", "variance", "beta", "gamma" ==> Const nodes containing
           normalization parameters
       offset: Offset that the batch norm node applies at inference time
-      data_format: Data format string, i.e. "NHWC" or "NCHW"; or None if the
-        original convolution didn't specify.
     """
     batch_norm_node = match_info["batch_norm"]
+    orig_inputs = batch_norm_node.inputs
+    conv_node = match_info["conv"] if "conv" in match_info else match_info[
+      "conv0"]
+    data_format = conv_node.get_attr("data_format") if conv_node.has_attr(
+      "data_format") else None
 
-    bias_offset_node = util.make_const(g, batch_norm_node.name + "_offset",
-                                       offset, uniquify_name=True)
-    bias_add_node = g.add_node(batch_norm_node.name + "_bias_add", "BiasAdd",
-                               uniquify_name=True)
-
-    if data_format is not None:
-      bias_add_node.add_attr("data_format", data_format)
-    bias_add_node.add_attr("T", batch_norm_node.get_attr("T"))
-    bias_add_node.set_inputs([batch_norm_node.inputs[0], bias_offset_node])
+    bias_add_node = build_bias_add(batch_norm_node.name + "_bias_add",
+                                   batch_norm_node.get_attr("T"),
+                                   offset, data_format,
+                                   batch_norm_node.inputs[0],
+                                   batch_norm_node.output(0).dtype,
+                                   batch_norm_node.output(0).shape)
 
     # Splice the batch norm op out of the graph and replace with a newly
     # created BiasAdd node.
-    reroute.reroute_ts(batch_norm_node.outputs, bias_add_node.outputs)
+    # Note that the batch norm node has a bunch of other outputs that aren't
+    # used in inference.
+    reroute.reroute_ts(batch_norm_node.output(0), bias_add_node.outputs)
     g.remove_node_by_name(batch_norm_node.name)
 
     # Original rewrite gave the name of the batch norm node to the BiasAdd.
@@ -318,10 +367,10 @@ def fold_old_batch_norms(g: graph.Graph):
       bias_add_node.add_to_collection(collection_name)
 
     # Remove the input constants if they are no longer used.
-    for key in ("mean", "variance", "beta", "gamma"):
-      n = match_info[key]
-      if len(n.output[0].consumers()) == 0:
-        g.remove_node_by_name(n.name)
+    for ix in range(1, 5):
+      in_tensor = orig_inputs[ix]
+      if len(in_tensor.consumers()) == 0:
+        g.remove_node_by_name(in_tensor.node.name)
 
   # Now we perform three passes to cover three different types of subgraph.
   # PASS 1: Simple Conv2D => [batch norm] pattern.
@@ -332,10 +381,10 @@ def fold_old_batch_norms(g: graph.Graph):
           TreeExpr(),
           TreeExpr(op="Const", alias="weights")
         )),
-      TreeExpr(op="Const", alias="mean"),
-      TreeExpr(op="Const", alias="variance"),
-      TreeExpr(op="Const", alias="beta"),
-      TreeExpr(op="Const", alias="gamma"),
+      TreeExpr(op="Const"),
+      TreeExpr(op="Const"),
+      TreeExpr(op="Const"),
+      TreeExpr(op="Const"),
     ))
 
   def action_1(_, match_info: Dict[str, node.Node]) -> bool:
@@ -349,9 +398,7 @@ def fold_old_batch_norms(g: graph.Graph):
 
     scale, offset = get_scale_and_offset(match_info)
     _add_scale_to_conv_weights(conv_node, weights_node, scale)
-    data_format = conv_node.get_attr("data_format") if conv_node.has_attr(
-      "data_format") else None
-    replace_batch_norm_with_bias_add(match_info, offset, data_format)
+    replace_batch_norm_with_bias_add(match_info, offset)
     return True
 
   _fixed_point_apply(pattern_1, action_1, g)
@@ -365,10 +412,10 @@ def fold_old_batch_norms(g: graph.Graph):
           TreeExpr(),
           TreeExpr(op="Const", alias="weights")
         )))),
-      TreeExpr(op="Const", alias="mean"),
-      TreeExpr(op="Const", alias="variance"),
-      TreeExpr(op="Const", alias="beta"),
-      TreeExpr(op="Const", alias="gamma"),
+      TreeExpr(op="Const"),
+      TreeExpr(op="Const"),
+      TreeExpr(op="Const"),
+      TreeExpr(op="Const"),
     ))
 
   def action_2(_, match_info: Dict[str, node.Node]) -> bool:
@@ -376,17 +423,14 @@ def fold_old_batch_norms(g: graph.Graph):
     weights_node = match_info["weights"]
 
     # If there is another direct consumer of the output of the convolution,
-    # or the BatchToSpace, skip the rewrite
-    if len(conv_node.outputs[0].consumers()) > 1:
-      return False
-    if len(match_info["batch_to_space"].outputs[0].consumers()) > 1:
-      return False
+    # the BatchToSpaceND, or the convolution weights, skip the rewrite
+    for n in (conv_node, weights_node, match_info["batch_to_space"]):
+      if len(n.output(0).consumers()) > 1:
+        return False
 
     scale, offset = get_scale_and_offset(match_info)
     _add_scale_to_conv_weights(conv_node, weights_node, scale)
-    data_format = conv_node.get_attr("data_format") if conv_node.has_attr(
-      "data_format") else None
-    replace_batch_norm_with_bias_add(match_info, offset, data_format)
+    replace_batch_norm_with_bias_add(match_info, offset)
     return True
 
   _fixed_point_apply(pattern_2, action_2, g)
@@ -395,7 +439,7 @@ def fold_old_batch_norms(g: graph.Graph):
   pattern_3 = TreeExpr(
     op="BatchNormWithGlobalNormalization|FusedBatchNorm",
     alias="batch_norm", inputs=(
-      TreeExpr(op="ConcatV2|Concat", inputs=(
+      TreeExpr(op="ConcatV2|Concat", alias="concat", inputs=(
         TreeExpr(op="Conv2D", alias="conv0", inputs=(
           TreeExpr(),
           TreeExpr(op="Const", alias="weights0")
@@ -406,10 +450,10 @@ def fold_old_batch_norms(g: graph.Graph):
         )),
         TreeExpr(op="Const", alias="axis")
       )),
-      TreeExpr(op="Const", alias="mean"),
-      TreeExpr(op="Const", alias="variance"),
-      TreeExpr(op="Const", alias="beta"),
-      TreeExpr(op="Const", alias="gamma"),
+      TreeExpr(op="Const"),
+      TreeExpr(op="Const"),
+      TreeExpr(op="Const"),
+      TreeExpr(op="Const"),
     ))
 
   def action_3(_, match_info: Dict[str, node.Node]) -> bool:
@@ -443,9 +487,7 @@ def fold_old_batch_norms(g: graph.Graph):
     _add_scale_to_conv_weights(conv0_node, weights0_node, scale_0)
     _add_scale_to_conv_weights(conv1_node, weights1_node, scale_1)
 
-    data_format = conv0_node.get_attr("data_format") if conv0_node.has_attr(
-      "data_format") else None
-    replace_batch_norm_with_bias_add(match_info, offset, data_format)
+    replace_batch_norm_with_bias_add(match_info, offset)
     return True
 
-  _fixed_point_apply(pattern_3, action_3)
+  _fixed_point_apply(pattern_3, action_3, g)

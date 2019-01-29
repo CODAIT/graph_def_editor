@@ -37,9 +37,12 @@ class RewriteTest(unittest.TestCase):
     max_diff_flat_ix = np.argmax(abs_diff)
     max_diff_ix = np.unravel_index(max_diff_flat_ix, abs_diff.shape)
     max_diff = abs_diff[max_diff_ix]
-    self.failIf(max_diff > delta,
-                msg="Maximum difference of {} at index {} is greater than "
-                    "tolerance {}".format(max_diff, max_diff_ix, delta))
+    if max_diff > delta:
+      self.fail(msg="Maximum difference of {} at index {} is greater than "
+                    "tolerance {} when comparing\n"
+                    "{}\n"
+                    "  and\n"
+                    "{}".format(max_diff, max_diff_ix, delta, expected, actual))
 
   def test_change_batch_size(self):
     """Basic test for gde.rewrite.change_batch_size."""
@@ -163,7 +166,6 @@ class RewriteTest(unittest.TestCase):
     # Rewrite and compare results
     g = gde.Graph(tf_g)
     gde.rewrite.fold_batch_norms(g)
-    print("After:\n{}".format(g.to_graph_def()))
     with tf.Session(graph=g.to_tf_graph()) as sess:
       fused_outputs = sess.run(output_t.name)
 
@@ -175,7 +177,7 @@ class RewriteTest(unittest.TestCase):
 
   def test_fold_old_batch_norms(self):
     """
-    Python port of TestFoldOldBatchNorms() in the TF Graph Transfrom Tool
+    Python port of TestFoldOldBatchNorms() in the TF Graph Transform Tool
     tests.
     """
     input_data = (
@@ -199,21 +201,31 @@ class RewriteTest(unittest.TestCase):
       weights_t = tf.constant(weights_data, name="weights_op")
       conv_t = tf.nn.conv2d(in_t, weights_t, [1, 1, 1, 1], "VALID",
                             name="conv_op")
-      _ = tf.constant(mean_data, name="mean_op")
-      _ = tf.constant(variance_data, name="variance_op")
-      _ = tf.constant(beta_data, name="beta_op")
-      _ = tf.constant(gamma_data, name="gamma_op")
-    g = gde.Graph(tf_g)
+      mean_t = tf.constant(mean_data, name="mean_op")
+      variance_t = tf.constant(variance_data, name="variance_op")
+      beta_t = tf.constant(beta_data, name="beta_op")
+      gamma_t = tf.constant(gamma_data, name="gamma_op")
+
+    # Set the producer version of the graph to a version where the
+    # BatchNormWithGlobalNormalization op still existed.
+    graph_def = tf_g.as_graph_def()
+    graph_def.versions.producer = 8
+    g = gde.Graph(graph_def)
 
     # Add a deprecated batch normalization operator directly to the GraphDef,
     # since the Python APIs for making this op no longer exist.
     batch_norm_node = g.add_node("output", "BatchNormWithGlobalNormalization")
-    batch_norm_node.set_inputs([g["conv_op:0"], g["mean_op:0"],
-                                g["variance_op:0"], g["beta_op:0"],
-                                g["gamma_op:0"]])
+    batch_norm_node.set_inputs([g[conv_t.name], g[mean_t.name],
+                                g[variance_t.name], g[beta_t.name],
+                                g[gamma_t.name]])
     batch_norm_node.add_attr("T", tf.float32)
     batch_norm_node.add_attr("variance_epsilon", 0.00001)
     batch_norm_node.add_attr("scale_after_normalization", False)
+    # Can't infer output shapes because this op no longer exists in the tf
+    # Python API. So copy output info from the convolution op.
+    conv_node = g.get_node_by_name(conv_t.op.name)
+    batch_norm_node.set_outputs_from_pairs(
+      [(t.dtype, t.shape) for t in conv_node.outputs])
 
     # Run the graph before and after the rewrite and compare results
     with tf.Session(graph=g.to_tf_graph()) as sess:
@@ -226,5 +238,197 @@ class RewriteTest(unittest.TestCase):
     # Make sure the rewrite happened
     for n in g.nodes:
       self.assertNotEqual(n.op_type, "BatchNormWithGlobalNormalization")
+
+  def test_fold_fused_batch_norms(self):
+    """
+    Version of test_fold_old_batch_norms() with a FusedBatchNorms op instead
+    of BatchNormWithGlobalNormalization
+    """
+    input_data = (
+      np.array([1., 4., 2., 5., 3., 6., -1., -4., -2., -5., -3., -6.],
+               dtype=np.float32).reshape([1, 1, 6, 2])
+    )
+    weights_data = (
+      np.array([1., 2., 3., 4., 0.1, 0.2, 0.3, 0.4],
+               dtype=np.float32).reshape([1, 2, 2, 2])
+    )
+    mean_data = np.array([10., 20.], dtype=np.float32).reshape([2])
+    variance_data = np.array([0.25, 0.5], dtype=np.float32).reshape([2])
+    beta_data = np.array([0.1, 0.6], dtype=np.float32).reshape([2])
+    gamma_data = np.array([1., 2.], dtype=np.float32).reshape([2])
+
+    # Create the non-deprecated part of the graph
+    # (input, weights) --> Conv2D --> [...], plus inputs to [...]
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      in_t = tf.constant(input_data, name="input_op")
+      weights_t = tf.constant(weights_data, name="weights_op")
+      conv_t = tf.nn.conv2d(in_t, weights_t, [1, 1, 1, 1], "VALID",
+                            name="conv_op")
+      mean_t = tf.constant(mean_data, name="mean_op")
+      variance_t = tf.constant(variance_data, name="variance_op")
+      beta_t = tf.constant(beta_data, name="beta_op")
+      gamma_t = tf.constant(gamma_data, name="gamma_op")
+    g = gde.Graph(tf_g)
+
+    # Add fused batch norm node manually because there's no Python API to add
+    # this op directly.
+    batch_norm_node = g.add_node("output", "FusedBatchNorm")
+    batch_norm_node.set_inputs([g[conv_t.name], g[gamma_t.name],
+                                g[beta_t.name], g[mean_t.name],
+                                g[variance_t.name]])
+    batch_norm_node.add_attr("T", tf.float32)
+    batch_norm_node.add_attr("epsilon", 0.00001)
+    batch_norm_node.add_attr("is_training", False)
+    batch_norm_node.infer_outputs()
+
+    # Run the graph before and after the rewrite and compare results
+    with tf.Session(graph=g.to_tf_graph()) as sess:
+      original_outputs = sess.run("output:0")
+    gde.rewrite.fold_old_batch_norms(g)
+    with tf.Session(graph=g.to_tf_graph()) as sess:
+      fused_outputs = sess.run("output:0")
+    self.assertClose(original_outputs, fused_outputs, delta=1e-5)
+
+    # Make sure the rewrite happened
+    for n in g.nodes:
+      self.assertNotEqual(n.op_type, "FusedBatchNorm")
+
+  def test_fold_old_batch_norms_with_concat(self):
+    """
+    Python port of TestFoldFusedBatchNormsWithConcat() in the TF Graph
+    Transform Tool tests.
+    """
+    # Run the test twice, changing how we concatenate the outputs of our two
+    # convolutions.
+    def run_test(split: bool):
+      """
+      Args:
+        split: if True, concatenate along channels dimension
+      """
+      input_shape = [1, 1, 6, 2] if split else [1, 1, 12, 1]
+      input_data = (
+        np.array([1., 4., 2., 5., 3., 6., -1., -4., -2., -5., -3., -6.],
+                 dtype=np.float32).reshape(input_shape)
+      )
+      weights_shape = [1, 2, 2, 1] if split else [1, 2, 1, 2]
+      weights_data = (
+        np.array([1., 2., 3., 4.], dtype=np.float32).reshape(weights_shape)
+      )
+      mean_data = np.array([10., 20.], dtype=np.float32).reshape([2])
+      variance_data = np.array([0.25, 0.5], dtype=np.float32).reshape([2])
+      beta_data = np.array([0.1, 0.6], dtype=np.float32).reshape([2])
+      gamma_data = np.array([1., 2.], dtype=np.float32).reshape([2])
+      concat_axis = 3 if split else 2
+
+      # Create the parts below the batch norm using TF APIs
+      # 2 X ((input, weights) --> Conv2D) --> Concat -> [...],
+      # plus inputs to [...]
+      tf_g = tf.Graph()
+      with tf_g.as_default():
+        in0_t = tf.constant(input_data, name="input_0_op")
+        weights0_t = tf.constant(weights_data, name="weights_0_op")
+        conv0_t = tf.nn.conv2d(in0_t, weights0_t, [1, 1, 1, 1], "VALID",
+                              name="conv_0_op")
+        in1_t = tf.constant(input_data, name="input_1_op")
+        weights1_t = tf.constant(weights_data, name="weights_1_op")
+        conv1_t = tf.nn.conv2d(in1_t, weights1_t, [1, 1, 1, 1], "VALID",
+                               name="conv_1_op")
+        concat_t = tf.concat([conv0_t, conv1_t], concat_axis, name="concat_op")
+        mean_t = tf.constant(mean_data, name="mean_op")
+        variance_t = tf.constant(variance_data, name="variance_op")
+        beta_t = tf.constant(beta_data, name="beta_op")
+        gamma_t = tf.constant(gamma_data, name="gamma_op")
+
+      g = gde.Graph(tf_g)
+
+      # Now add the FusedBatchNorm node directly, since there's no TF API to
+      # create that op.
+      batch_norm_node = g.add_node("output", "FusedBatchNorm")
+      batch_norm_node.set_inputs([g[concat_t.name], g[gamma_t.name],
+                                  g[beta_t.name], g[mean_t.name],
+                                  g[variance_t.name]])
+      batch_norm_node.add_attr("T", tf.float32)
+      batch_norm_node.add_attr("epsilon", 0.00001)
+      batch_norm_node.add_attr("is_training", False)
+      batch_norm_node.infer_outputs()
+
+      # Run the graph before and after the rewrite and compare results
+      with tf.Session(graph=g.to_tf_graph()) as sess:
+        original_outputs = sess.run("output:0")
+      gde.rewrite.fold_old_batch_norms(g)
+      with tf.Session(graph=g.to_tf_graph()) as sess:
+        fused_outputs = sess.run("output:0")
+      self.assertClose(original_outputs, fused_outputs, delta=2e-5)
+
+      # Make sure the rewrite happened
+      for n in g.nodes:
+        self.assertNotEqual(n.op_type, "FusedBatchNorm")
+
+    # Invoke the function that we just defined twice.
+    run_test(split=True)
+    run_test(split=False)
+
+  def test_fold_old_batch_norms_with_batch_to_space(self):
+    """
+    Python port of TestFoldFusedBatchNormsWithBatchToSpace() in the TF Graph
+    Transform Tool tests.
+    """
+    input_data = (
+      np.array([1., 4., 2., 5., 3., 6., -1., -4., -2., -5., -3., -6.],
+               dtype=np.float32).reshape([2, 1, 3, 2])
+    )
+    weights_data = (
+      np.array([1., 2., 3., 4., 0.1, 0.2, 0.3, 0.4],
+               dtype=np.float32).reshape([1, 2, 2, 2])
+    )
+    mean_data = np.array([10., 20.], dtype=np.float32).reshape([2])
+    variance_data = np.array([0.25, 0.5], dtype=np.float32).reshape([2])
+    beta_data = np.array([0.1, 0.6], dtype=np.float32).reshape([2])
+    gamma_data = np.array([1., 2.], dtype=np.float32).reshape([2])
+    block_shape_data = np.array([1, 2]).reshape([2])
+    crops_data = np.array([0, 0, 0, 1]).reshape([2, 2])
+
+    # Create the parts below the batch norm using TF APIs
+    # (input, weights) --> Conv2D --> BatchToSpaceND --> [...],
+    # plus inputs to [...]
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      in_t = tf.constant(input_data, name="input_op")
+      weights_t = tf.constant(weights_data, name="weights_op")
+      conv_t = tf.nn.conv2d(in_t, weights_t, [1, 1, 1, 1], "VALID",
+                            name="conv_op")
+      batch_to_space_t = tf.batch_to_space_nd(conv_t, block_shape_data,
+                                              crops_data,
+                                              name="batch_to_space_op")
+      mean_t = tf.constant(mean_data, name="mean_op")
+      variance_t = tf.constant(variance_data, name="variance_op")
+      beta_t = tf.constant(beta_data, name="beta_op")
+      gamma_t = tf.constant(gamma_data, name="gamma_op")
+
+    g = gde.Graph(tf_g)
+
+    # Now add the FusedBatchNorm node directly, since there's no TF API to
+    # create that op.
+    batch_norm_node = g.add_node("output", "FusedBatchNorm")
+    batch_norm_node.set_inputs([g[batch_to_space_t.name], g[gamma_t.name],
+                                g[beta_t.name], g[mean_t.name],
+                                g[variance_t.name]])
+    batch_norm_node.add_attr("T", tf.float32)
+    batch_norm_node.add_attr("epsilon", 0.00001)
+    batch_norm_node.add_attr("is_training", False)
+    batch_norm_node.infer_outputs()
+
+    # Run the graph before and after the rewrite and compare results
+    with tf.Session(graph=g.to_tf_graph()) as sess:
+      original_outputs = sess.run("output:0")
+    gde.rewrite.fold_old_batch_norms(g)
+    with tf.Session(graph=g.to_tf_graph()) as sess:
+      fused_outputs = sess.run("output:0")
+    self.assertClose(original_outputs, fused_outputs, delta=1e-5)
+
+    # Make sure the rewrite happened
+    for n in g.nodes:
+      self.assertNotEqual(n.op_type, "FusedBatchNorm")
 
 

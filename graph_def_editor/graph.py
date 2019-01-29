@@ -166,6 +166,7 @@ class Graph(object):
     self._collection_name_to_type = None  # Dict[str, str], generated on demand
     self._passthrough_collections = {}  # Dict[str, List[CollectionDef]]
     self._passthrough_saver = None
+    self._passthrough_versions = graph_def.versions  # tf.VersionDef
 
     # Load nodes in three passes because the g may contain cycles.
     for node_def in graph_def.node:
@@ -278,7 +279,7 @@ class Graph(object):
     else:
       raise ValueError("No node or tensor '{}' found in graph".format(name))
 
-  def get_node_by_name(self, name: str):
+  def get_node_by_name(self, name: str) -> 'node.Node':
     """
     Retrieve a node in the graph by name.
 
@@ -583,6 +584,7 @@ class Graph(object):
     form.
     """
     ret = tf.GraphDef()
+    ret.versions.CopyFrom(self._passthrough_versions)
     for op in self.nodes:
       op.to_node_def(ret.node.add(), add_shapes)
     return ret
