@@ -491,3 +491,5 @@ def fold_old_batch_norms(g: graph.Graph):
     return True
 
   _fixed_point_apply(pattern_3, action_3, g)
+
+

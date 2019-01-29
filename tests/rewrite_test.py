@@ -175,6 +175,92 @@ class RewriteTest(unittest.TestCase):
     for n in g.nodes:
       self.assertNotEqual(n.op_type, "Mul")
 
+  def test_fold_batch_norms_conv_2d_shared(self):
+    """
+    Python port of TestFoldBatchNormsConv2DShared in the TF Graph Transform Tool
+    tests.
+    """
+    input_data = (
+      np.array([1., 4., 2., 5., 3., 6., -1., -4., -2., -5., -3., -6.],
+               dtype=np.float32).reshape([1, 1, 6, 2])
+    )
+    weights_data = (
+      np.array([1., 2., 3., 4., 0.1, 0.2, 0.3, 0.4],
+               dtype=np.float32).reshape([1, 2, 2, 2])
+    )
+    mul_values_data = (
+      np.array([2., 3.], dtype=np.float32).reshape([2])
+    )
+    mul_values_data_2 = (
+      np.array([1., 2.], dtype=np.float32).reshape([2])
+    )
+
+    # Create and run graph:
+    # (input, weights) --> Conv2D --> Mul(const)
+    #                         |-----> Mul(const)
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      in_t = tf.constant(input_data, name="input_op")
+      weights_t = tf.constant(weights_data, name="weights_op")
+      conv_t = tf.nn.conv2d(in_t, weights_t, [1, 1, 1, 1], "VALID",
+                            name="conv_op")
+      mul_values_t = tf.constant(mul_values_data, name="mul_values")
+      output_t = tf.multiply(conv_t, mul_values_t, name="output")
+      mul_values_2_t = tf.constant(mul_values_data_2, name="mul_values_2")
+      output_2_t = tf.multiply(conv_t, mul_values_2_t, name="output_2")
+    with tf.Session(graph=tf_g) as sess:
+      original_outputs = sess.run([output_t, output_2_t])
+
+    # Rewrite and compare results
+    g = gde.Graph(tf_g)
+    gde.rewrite.fold_batch_norms(g)
+    with tf.Session(graph=g.to_tf_graph()) as sess:
+      fused_outputs = sess.run([output_t.name, output_2_t.name])
+
+    self.assertClose(original_outputs[0], fused_outputs[0], delta=1e-5)
+    self.assertClose(original_outputs[1], fused_outputs[1], delta=1e-5)
+
+  def test_fold_batch_norms_mat_mul(self):
+    """
+    Python port of TestFoldBatchNormsMatMul in the TF Graph Transform Tool
+    tests.
+    """
+    input_data = (
+      np.array([1., 4., 2., 5., 3., 6., -1., -4., -2., -5., -3., -6.],
+               dtype=np.float32).reshape([6, 2])
+    )
+    weights_data = (
+      np.array([1., 2., 3., 4.],
+               dtype=np.float32).reshape([2, 2])
+    )
+    mul_values_data = (
+      np.array([2., 3.], dtype=np.float32).reshape([2])
+    )
+
+    # Create and run graph:
+    # (input, weights) --> MatMul --> Mul(const)
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      in_t = tf.constant(input_data, name="input_op")
+      weights_t = tf.constant(weights_data, name="weights_op")
+      matmul_t = tf.linalg.matmul(in_t, weights_t, name="matmul_op")
+      mul_values_t = tf.constant(mul_values_data, name="mul_values")
+      output_t = tf.multiply(matmul_t, mul_values_t, name="output")
+    with tf.Session(graph=tf_g) as sess:
+      original_outputs = sess.run(output_t)
+
+    # Rewrite and compare results
+    g = gde.Graph(tf_g)
+    gde.rewrite.fold_batch_norms(g)
+    with tf.Session(graph=g.to_tf_graph()) as sess:
+      fused_outputs = sess.run(output_t.name)
+
+    self.assertClose(original_outputs, fused_outputs, delta=1e-5)
+
+    # Make sure the rewrite happened
+    for n in g.nodes:
+      self.assertNotEqual(n.op_type, "Mul")
+
   def test_fold_old_batch_norms(self):
     """
     Python port of TestFoldOldBatchNorms() in the TF Graph Transform Tool
