@@ -242,11 +242,15 @@ class Graph(object):
     collection = collection_def.value
     # The collection is stored in exactly one of five different formats.
     if collection.HasField("node_list"):
-      for node_name in collection_def.value.node_list.value:
-        n = self.get_node_by_name(node_name)
+      for node_name in collection.node_list.value:
+        # Check if node name is a Tensor type
+        if node_name.rfind(':') > -1:
+          n = self.get_tensor_by_name(node_name)
+        else:
+          n = self.get_node_by_name(node_name)
         n.add_to_collection(collection_name)
     elif collection.HasField("bytes_list"):
-      for serialized_var in collection_def.value.bytes_list.value:
+      for serialized_var in collection.bytes_list.value:
         var = self.add_variable_from_variable_def(serialized_var,
                                                   skip_if_present=True)
         var.add_to_collection(collection_name)
@@ -802,6 +806,9 @@ class Graph(object):
       for n in self.nodes:
         if name in n.collection_names:
           ret.append(n)
+      for t in self.tensors:
+        if name in t.collection_names:
+          ret.append(t)
       return ret
     else:
       raise ValueError("Unknown collection type '{}'".format(coll_type))
@@ -818,6 +825,15 @@ class Graph(object):
     for n in self.nodes:
       for name in n.collection_names:
         node_collection_names.add(name)
+    node_collection_names_tensors = set()
+    for t in self.tensors:
+      for name in t.collection_names:
+        node_collection_names_tensors.add(name)
+    if not node_collection_names_tensors.intersection(node_collection_names):
+      node_collection_names.update(node_collection_names_tensors)
+    else:
+      raise TypeError("Node collections cannot be Nodes and Tensors for: {}".format(name))
+
 
     def _add(names, type_name):
       for coll_name in names:
@@ -1118,6 +1134,7 @@ def saved_model_to_graph(saved_model_path: str, tag: str = None,
     collection_proto.key = collection_name
     collection_proto.value.CopyFrom(
       meta_graph.collection_def[collection_name])
+    collections.append(collection_proto)
   if include_saver and meta_graph.HasField("saver_def"):
     saver_info = SaverInfo(_vars_dir_for_saved_model(saved_model_path),
                            meta_graph.saver_def)

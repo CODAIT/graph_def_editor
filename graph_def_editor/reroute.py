@@ -18,6 +18,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import itertools
+
 from graph_def_editor import node, subgraph, util
 
 _allowed_symbols = [
@@ -490,6 +492,5 @@ def add_control_inputs(op, cops):
     if cop in op.control_inputs:
       raise ValueError("{} is already a control_input of {}".format(cop.name,
                                                                     op.name))
-  op._add_control_inputs(cops)  # pylint: disable=protected-access
-
-
+  op.set_control_inputs(itertools.chain(op.control_inputs, cops))
+  op.graph.increment_version_counter()
