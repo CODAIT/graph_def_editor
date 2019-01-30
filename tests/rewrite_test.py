@@ -517,4 +517,106 @@ class RewriteTest(unittest.TestCase):
     for n in g.nodes:
       self.assertNotEqual(n.op_type, "FusedBatchNorm")
 
+  def test_fold_batch_norms_up(self):
+    """
+    Test of the fold_batch_norms_up() rewrite with the pattern:
+      Mul => Add => Conv2D
+    """
+    input_data = (
+      np.array([1., 4., 2., 5., 3., 6., -1., -4., -2., -5., -3., -6.],
+               dtype=np.float32).reshape([1, 1, 6, 2])
+    )
+    weights_data = (
+      np.array([1., 2., 3., 4., 0.1, 0.2, 0.3, 0.4],
+               dtype=np.float32).reshape([1, 2, 2, 2])
+    )
+    mul_values_data = (
+      np.array([2., 3.], dtype=np.float32).reshape([2])
+    )
+    add_values_data = (
+      np.array([0.1, 0.2], dtype=np.float32).reshape([2])
+    )
 
+    # Create and run graph:
+    # input -> Mul -> Add -> Conv2D(weights)
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      in_t = tf.constant(input_data, name="input_op")
+      mul_t = tf.multiply(in_t, mul_values_data, name="mul_op")
+      add_t = tf.add(mul_t, add_values_data, name="add_op")
+      weights_t = tf.constant(weights_data, name="weights_op")
+      output_t = tf.nn.conv2d(add_t, weights_t, [1, 1, 1, 1], "VALID",
+                              name="output")
+    with tf.Session(graph=tf_g) as sess:
+      original_outputs = sess.run(output_t)
+
+    # Rewrite and compare results
+    g = gde.Graph(tf_g)
+    gde.rewrite.fold_batch_norms_up(g)
+    with tf.Session(graph=g.to_tf_graph()) as sess:
+      fused_outputs = sess.run(output_t.name)
+
+    self.assertClose(original_outputs, fused_outputs, delta=1e-5)
+
+    # Make sure the rewrite happened
+    for n in g.nodes:
+      self.assertNotEqual(n.op_type, "Mul")
+
+  def test_fold_batch_norms_up_fused(self):
+    """
+    Test of the fold_batch_norms_up() rewrite with the pattern:
+       FusedBatchNorm => Relu => Conv2D
+    """
+    input_data = (
+      np.array([1., 4., 2., 5., 3., 6., -1., -4., -2., -5., -3., -6.],
+               dtype=np.float32).reshape([1, 1, 6, 2])
+    )
+    weights_data = (
+      np.array([1., 2., 3., 4., 0.1, 0.2, 0.3, 0.4],
+               dtype=np.float32).reshape([1, 2, 2, 2])
+    )
+    mean_data = np.array([10., 20.], dtype=np.float32).reshape([2])
+    variance_data = np.array([0.25, 0.5], dtype=np.float32).reshape([2])
+    beta_data = np.array([0.1, 0.6], dtype=np.float32).reshape([2])
+    gamma_data = np.array([1., 2.], dtype=np.float32).reshape([2])
+
+    # Create the non-deprecated part of the graph
+    # input -> Relu -> Conv2D
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      in_t = tf.constant(input_data, name="input_op")
+      relu_t = tf.nn.relu(in_t, name="relu_op")
+      weights_t = tf.constant(weights_data, name="weights_op")
+      conv_t = tf.nn.conv2d(relu_t, weights_t, [1, 1, 1, 1], "VALID",
+                            name="output")
+      mean_t = tf.constant(mean_data, name="mean_op")
+      variance_t = tf.constant(variance_data, name="variance_op")
+      beta_t = tf.constant(beta_data, name="beta_op")
+      gamma_t = tf.constant(gamma_data, name="gamma_op")
+    g = gde.Graph(tf_g)
+
+    # Add fused batch norm node manually because there's no Python API to add
+    # this op directly.
+    batch_norm_node = g.add_node("batch_norm_op", "FusedBatchNorm")
+    batch_norm_node.set_inputs([g[in_t.name], g[gamma_t.name],
+                                g[beta_t.name], g[mean_t.name],
+                                g[variance_t.name]])
+    batch_norm_node.add_attr("T", tf.float32)
+    batch_norm_node.add_attr("epsilon", 0.00001)
+    batch_norm_node.add_attr("is_training", False)
+    batch_norm_node.infer_outputs()
+
+    # Redirect the input of the ReLU to our new batch norm
+    g.get_node_by_name(relu_t.op.name).set_inputs([batch_norm_node.output(0)])
+
+    # Run the graph before and after the rewrite and compare results
+    with tf.Session(graph=g.to_tf_graph()) as sess:
+      original_outputs = sess.run("output:0")
+    gde.rewrite.fold_batch_norms_up(g)
+    with tf.Session(graph=g.to_tf_graph()) as sess:
+      fused_outputs = sess.run("output:0")
+    self.assertClose(original_outputs, fused_outputs, delta=1e-5)
+
+    # Make sure the rewrite happened
+    for n in g.nodes:
+      self.assertNotEqual(n.op_type, "FusedBatchNorm")

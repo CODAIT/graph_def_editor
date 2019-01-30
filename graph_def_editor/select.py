@@ -23,7 +23,7 @@ import re
 
 from six import iteritems
 from six import string_types
-
+import textwrap
 from typing import Any, Dict, List, Iterable, Union
 
 from graph_def_editor import util
@@ -813,6 +813,7 @@ class TreeExpr(object):
   def __init__(self,
                alias: str = None,
                op: str = None,
+               optional: bool = None,
                inputs: Union["TreeExpr", Iterable["TreeExpr"]] = None,
                ):
     """
@@ -828,12 +829,43 @@ class TreeExpr(object):
         A value of None means "don't filter on inputs"
         Can also be single predicate, in which case it will be converted to a
         one-element tuple.
+      optional: If True, match expressions that do not include this node but
+        do include any child nodes. Equivalent to "?" in a regular expression.
+        Defaults to False.
     """
     if isinstance(inputs, TreeExpr):
       inputs = (inputs,)
+    if optional and len(inputs) > 1:
+      raise ValueError("'optional' flag only supported with zero or one "
+                       "inputs")
     self._alias = alias
     self._op_type_regex = None if op is None else make_regex(op)
     self._input_exprs = inputs
+    self._optional = optional
+
+  def __repr__(self):
+    ret = "TreeExpr("
+    args = []
+    if self._alias is not None:
+      args.append("alias='{}'".format(self._alias))
+    if self._op_type_regex is not None:
+      args.append("op='{}'".format(self._op_type_regex))
+    if self._optional is not None:
+      args.append("optional={}".format(self._optional))
+    ret += ", ".join(args)
+    if self._input_exprs is not None:
+      if len(args) > 0:
+        ret += ", "
+      ret += "inputs=(\n"
+      ret += ",\n".join(
+        [textwrap.indent(repr(i), "  ") for i in self._input_exprs]
+      )
+      ret += ")"
+    ret += ")"
+    return ret
+
+  def __str__(self):
+    return repr(self)
 
   def eval_from(self, potential_root_node: Node) -> Dict[str, Node]:
     """
@@ -846,6 +878,25 @@ class TreeExpr(object):
       Returns a Dict mapping node alias to node instance if there is a match
       at the indicated root.
       Returns None if there is no match starting from the indicated root.
+    """
+    if potential_root_node.graph is None:
+      raise ValueError("TreeExpr evaluation hit a node that has been removed "
+                       "from the graph.\n"
+                       "Node is {}, and expression is:\n"
+                       "{}".format(potential_root_node, self))
+    result_at_root = self._eval_without_optional(potential_root_node)
+    if result_at_root is not None:
+      return result_at_root
+    elif self._optional:
+      # No match at this root, but maybe that's because this optional node of
+      # the tree isn't part of the current match.
+      return self._input_exprs[0].eval_from(potential_root_node)
+    else:
+      return None
+
+  def _eval_without_optional(self, potential_root_node: Node):
+    """
+    Handle every part of the expression except the "optional" clause.
     """
     result = {}
     prn = potential_root_node
@@ -871,7 +922,3 @@ class TreeExpr(object):
       result[self._alias] = prn
     return result
 
-
-def select_op_type_pattern_match(expr: List[Any]):
-  """
-  """

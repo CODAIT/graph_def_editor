@@ -546,7 +546,7 @@ class Node(object):
       new_shapes = _validate_output_shapes_attr(value)
       self._update_shapes(new_shapes)
     elif key not in self._attr_names():
-      raise ValueError("No attribute called '{}'".format(key))
+      raise ValueError("{} has no attribute called '{}'".format(self, key))
     else:
       for i in range(len(self._attributes)):
         if self._attributes[i][0] == key:

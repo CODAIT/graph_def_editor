@@ -137,7 +137,7 @@ def _scale_weights(weights_node: node.Node,
 
   scaled_weights = np.float64(weights)
   for col in range(scale.shape[0]):
-    indexes = [i if i == dim else slice(None)
+    indexes = [col if i == dim else slice(None)
                for i in range(len(weights.shape))]
     scaled_weights[indexes] *= scale[col]
 
@@ -204,7 +204,7 @@ def fold_batch_norms(g: graph.Graph):
     _add_scale_to_conv_weights(conv_node, weights_node, scale)
 
     # Cut the Mul node out of the graph
-    reroute.reroute_ts(mul_node.outputs[0], mul_node.inputs[0])
+    reroute.reroute_ts(mul_node.inputs[0], mul_node.outputs[0])
     g.remove_node_by_name(mul_node.name)
 
     # Const might still be in use; check before removing it.
@@ -332,7 +332,7 @@ def _replace_batch_norm_with_bias_add(
   # TODO(frreiss): Support non-32-bit offsets
   bias_offset_node = util.make_const(g, batch_norm_node.name + "_offset",
                                      np.float32(offset), uniquify_name=True)
-  bias_add_node = g.add_node(batch_norm_node + "_bias_add", "BiasAdd",
+  bias_add_node = g.add_node(batch_norm_node.name + "_bias_add", "BiasAdd",
                              uniquify_name=True)
   if data_format is not None:
     bias_add_node.add_attr("data_format", data_format)
@@ -345,7 +345,7 @@ def _replace_batch_norm_with_bias_add(
   # created BiasAdd node.
   # Note that the batch norm node has a bunch of other outputs that aren't
   # used in inference.
-  reroute.reroute_ts(batch_norm_node.output(0), bias_add_node.outputs)
+  reroute.reroute_ts(bias_add_node.output(0), batch_norm_node.output(0))
   g.remove_node_by_name(batch_norm_node.name)
 
   # Original rewrite gave the name of the batch norm node to the BiasAdd.
@@ -506,11 +506,11 @@ def fold_batch_norms_up(g: graph.Graph):
   """
   Identifies instances of the pattern
   ```
-     Mul => Add => [Conv2D|MatMul|DepthwiseConv2d]
+     Mul => Add => (optional ReLU) => [Conv2D|MatMul|DepthwiseConv2d]
   ```
   and the equivalent pattern
   ```
-    FusedBatchNorm => [Conv2D|MatMul|DepthwiseConv2d]
+    FusedBatchNorm => (optional ReLU) => [Conv2D|MatMul|DepthwiseConv2d]
   ```
   Then fuses the multiplication into the convolution's filter coefficients
   and applies a correction to the Add op to compensate for add happening
@@ -526,12 +526,14 @@ def fold_batch_norms_up(g: graph.Graph):
 
   pattern_1 = (
     TreeExpr(op="Conv2D|MatMul|DepthwiseConv2dNative", alias="conv", inputs=(
-      TreeExpr(op="Add", alias="add", inputs=(
-        TreeExpr(op="Mul", alias="mul", inputs=(
-          TreeExpr(),
-          TreeExpr(op="Const", alias="mul_values")
-        )),
-        TreeExpr(op="Const", alias="add_values")
+      TreeExpr(op="Relu", optional=True, inputs=(
+        TreeExpr(op="Add", alias="add", inputs=(
+          TreeExpr(op="Mul", alias="mul", inputs=(
+            TreeExpr(),
+            TreeExpr(op="Const", alias="mul_values")
+          )),
+          TreeExpr(op="Const", alias="add_values")
+        ))
       )),
       TreeExpr(op="Const", alias="weights")))
   )
@@ -550,18 +552,18 @@ def fold_batch_norms_up(g: graph.Graph):
       if len(n.output(0).consumers()) > 1:
         return False
 
-    # Scale the weights to compensate for unscaled inputs
+    # Scale the weights to compensate for unscaled inputs.
     scale = np.float64(mul_values_node.get_attr("value"))
     _scale_weights(weights_node, scale, compute_input_dim(conv_node))
 
     # Divide the additive factor to compensate for the multiplication being
-    # pulled above the Add
+    # pulled above the Add.
     add_values = add_values_node.get_attr("value")
     new_add_values = add_values.astype(np.float64) / scale
-    add_node.replace_attr("value", new_add_values.astype(add_values.dtype))
+    add_values_node.replace_attr("value", new_add_values.astype(add_values.dtype))
 
     # Cut the Mul node out of the graph
-    reroute.reroute_ts(mul_node.outputs[0], mul_node.inputs[0])
+    reroute.reroute_ts(mul_node.inputs[0], mul_node.outputs[0])
     g.remove_node_by_name(mul_node.name)
 
     # Const might still be in use; check before removing it.
@@ -574,13 +576,15 @@ def fold_batch_norms_up(g: graph.Graph):
 
   pattern_2 = (
     TreeExpr(op="Conv2D|MatMul|DepthwiseConv2dNative", alias="conv", inputs=(
-      TreeExpr(op="FusedBatchNorm", alias="batch_norm", inputs=(
-          TreeExpr(),
-          TreeExpr(op="Const"),
-          TreeExpr(op="Const"),
-          TreeExpr(op="Const"),
-          TreeExpr(op="Const")
-        )),
+      TreeExpr(op="Relu", optional=True, inputs=(
+        TreeExpr(op="FusedBatchNorm", alias="batch_norm", inputs=(
+            TreeExpr(),
+            TreeExpr(op="Const"),
+            TreeExpr(op="Const"),
+            TreeExpr(op="Const"),
+            TreeExpr(op="Const")
+          )),
+      )),
       TreeExpr(op="Const", alias="weights")))
   )
 
@@ -597,11 +601,11 @@ def fold_batch_norms_up(g: graph.Graph):
 
     scale, offset = _get_scale_and_offset(match_info)
 
-    # Scale the weights to compensate for unscaled inputs
+    # Scale the weights to compensate for unscaled inputs.
     _scale_weights(weights_node, scale, compute_input_dim(conv_node))
 
     # Divide the additive factor to compensate for the multiplication being
-    # pulled above the Add
+    # pulled above the fused batch norm's embedded addition.
     offset /= scale
     _replace_batch_norm_with_bias_add(g, match_info, offset)
 
