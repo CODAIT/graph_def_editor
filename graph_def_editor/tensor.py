@@ -124,10 +124,8 @@ class Tensor(object):
     """
     Add the tensor to the indicated collection.
     """
-    if collection_name in self._collection_names:
-      raise ValueError("Tensor '{}' already in collection '{}'".format(
-        self.name, collection_name))
-    self._collection_names.add(collection_name)
-    # Invalidate any information the parent graph may have cached about
-    # collections.
-    self.node._graph.increment_version_counter()
+    if collection_name not in self._collection_names:
+      self._collection_names.add(collection_name)
+      # Invalidate any information the parent graph may have cached about
+      # collections.
+      self.node._graph.increment_version_counter()
