@@ -560,7 +560,8 @@ def fold_batch_norms_up(g: graph.Graph):
     # pulled above the Add.
     add_values = add_values_node.get_attr("value")
     new_add_values = add_values.astype(np.float64) / scale
-    add_values_node.replace_attr("value", new_add_values.astype(add_values.dtype))
+    add_values_node.replace_attr("value", new_add_values.astype(
+      add_values.dtype))
 
     # Cut the Mul node out of the graph
     reroute.reroute_ts(mul_node.inputs[0], mul_node.outputs[0])

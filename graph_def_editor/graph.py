@@ -832,8 +832,8 @@ class Graph(object):
     if not node_collection_names_tensors.intersection(node_collection_names):
       node_collection_names.update(node_collection_names_tensors)
     else:
-      raise TypeError("Node collections cannot be Nodes and Tensors for: {}".format(name))
-
+      raise TypeError("Node collections cannot be Nodes and Tensors for: "
+                      "{}".format(name))
 
     def _add(names, type_name):
       for coll_name in names:
@@ -1065,7 +1065,6 @@ class Graph(object):
     this map will be reflected in this object.
     """
     return self._signatures.signature_defs
-
 
 
 def saved_model_to_graph(saved_model_path: str, tag: str = None,
