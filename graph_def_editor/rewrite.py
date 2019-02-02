@@ -246,7 +246,8 @@ def _get_batch_norm_params(
   """
   def get_const_values():
     return (np.float64(batch_norm_node.inputs[ix].node.get_attr("value"))
-            for ix in range(1, 5))
+            for ix in range(1, 5)  # Inputs 1-4 are the normalization params.
+            )
 
   # Compensate for different input orders and attribute names
   if "BatchNormWithGlobalNormalization" == batch_norm_node.op_type:
@@ -356,6 +357,8 @@ def _replace_batch_norm_with_bias_add(
     bias_add_node.add_to_collection(collection_name)
 
   # Remove the input constants if they are no longer used.
+  # Input 0 is the value to be normalized, and inputs 1-4 are the consts that
+  # hold normalization parameters.
   for ix in range(1, 5):
     in_tensor = orig_inputs[ix]
     if len(in_tensor.consumers()) == 0:
