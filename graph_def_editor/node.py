@@ -75,7 +75,7 @@ class Node(object):
     self._collection_names = set()  # Set[str]
 
   def __repr__(self):
-    return "Node[{}]".format(self.name)
+    return "Node[{}|{}]".format(self.name, self.op_type)
 
   @property
   def name(self) -> str:
@@ -84,6 +84,17 @@ class Node(object):
        Unique name of the node that this Node represents
     """
     return self._name
+
+  def _change_name(self, new_name: str):
+    """
+    THIS METHOD SHOULD ONLY BE CALLED BY THE PARENT GRAPH
+
+    Changes this node's `name` attribute WITHOUT UPDATING THE PARENT GRAPH.
+
+    Args:
+      new_name: New value for the `name` attribute.
+    """
+    self._name = new_name
 
   @property
   def op_type(self) -> str:
@@ -120,8 +131,19 @@ class Node(object):
     """
     return self._id
 
+  def _remove_from_graph(self):
+    """
+    THIS METHOD TO BE CALLED ONLY BY THE PARENT GRAPH.
+
+    Sets this node's graph pointer to None. DOES NOT UPDATE POINTERS TO THIS
+    NODE FROM THE PARENT GRAPH.
+    """
+    self._graph = None
+    # Don't need to update output tensors because they don't store a pointer
+    # to the graph, only to the node
+
   @property
-  def outputs(self):
+  def outputs(self) -> Tuple[tensor.Tensor]:
     """
     Returns:
       Tuple (i.e. immutable list) of `gde.Tensor` objects representing the
@@ -129,10 +151,10 @@ class Node(object):
       the underlying node is mutable and gets edited.
     """
     if self._outputs is None:
-      raise ValueError("Outputs have not been set")
+      raise ValueError("Outputs of {} have not been set".format(self))
     return tuple(self._outputs)
 
-  def output(self, index: int):
+  def output(self, index: int) -> tensor.Tensor:
     """
     Args:
       index: Index of an output of the node
@@ -412,6 +434,15 @@ class Node(object):
     else:
       return ret
 
+  def has_attr(self, key: str) -> bool:
+    """
+    Args:
+      key: String name of a potential attribute
+
+    Returns True if the node has an attribute under the indicated key
+    """
+    return key in self._attributes
+
   def get_attr_keys(self) -> Tuple[str]:
     """
     Returns:
@@ -457,6 +488,7 @@ class Node(object):
     elif key in self._attr_names():
       raise ValueError("Already have an attribute called '{}'".format(key))
     else:
+      # Make sure attributes appear in protobuf in the order added
       self._attributes.append((key, value))
 
   def _update_shapes(self, new_shapes: List[tf.TensorShape]):
@@ -512,7 +544,7 @@ class Node(object):
       new_shapes = _validate_output_shapes_attr(value)
       self._update_shapes(new_shapes)
     elif key not in self._attr_names():
-      raise ValueError("No attribute called '{}'".format(key))
+      raise ValueError("{} has no attribute called '{}'".format(self, key))
     else:
       for i in range(len(self._attributes)):
         if self._attributes[i][0] == key:
@@ -652,6 +684,12 @@ class Node(object):
       # Invalidate any information the parent graph may have cached about
       # collections.
       self._graph.increment_version_counter()
+
+  def remove_from_collections(self):
+    """
+    Remove this node from amy collections that it is currently a member of.
+    """
+    self._collection_names.clear()
 
 
 ################################################################################

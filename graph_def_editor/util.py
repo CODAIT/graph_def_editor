@@ -569,12 +569,13 @@ def _python_type_to_attr_list_elem(list_value: tf.AttrValue.ListValue,
   """
   if isinstance(elem, str):
     list_value.s.append(tf.compat.as_bytes(elem))
+  # Must check for bool before int because bool is a subclass of int in Python
+  elif isinstance(elem, bool):
+    list_value.b.append(elem)
   elif isinstance(elem, int):
     list_value.i.append(elem)
   elif isinstance(elem, float):
     list_value.f.append(elem)
-  elif isinstance(elem, bool):
-    list_value.b.append(elem)
   elif isinstance(elem, tf.DType):
     list_value.type.append(elem.as_datatype_enum)
   elif isinstance(elem, tf.TensorShape):
@@ -615,12 +616,13 @@ def python_type_to_attr_value(value: Any) -> tf.AttrValue:
   # Scalar types, in the order they appear in the .proto file
   elif isinstance(value, str):
     return tf.AttrValue(s=tf.compat.as_bytes(value))
+  # Must check for bool before int because bool is a subclass of int in Python
+  elif isinstance(value, bool):
+    return tf.AttrValue(b=value)
   elif isinstance(value, int):
     return tf.AttrValue(i=value)
   elif isinstance(value, float):
     return tf.AttrValue(f=value)
-  elif isinstance(value, bool):
-    return tf.AttrValue(b=value)
   elif isinstance(value, tf.DType):
     return tf.AttrValue(type=value.as_datatype_enum)
   elif isinstance(value, tf.TensorShape):

@@ -161,7 +161,7 @@ def _reroute_ts(ts0, ts1, mode, can_modify=None, cannot_modify=None):
   Args:
     ts0: an object convertible to a list of `tf.Tensor`.
     ts1: an object convertible to a list of `tf.Tensor`.
-    mode: what to do with those tensors: "a->b" or "b<->a" for swaping and
+    mode: what to do with those tensors: "a<->b" or "b<->a" for swapping and
       "a->b" or "b->a" for one direction re-routing.
     can_modify: iterable of operations which can be modified. Any operation
       outside within_ops will be left untouched by this function.

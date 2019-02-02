@@ -23,30 +23,34 @@ import re
 
 from six import iteritems
 from six import string_types
+import textwrap
+from typing import Any, Dict, List, Iterable, Union
 
 from graph_def_editor import util
 from graph_def_editor.graph import Graph
 from graph_def_editor.tensor import Tensor
+from graph_def_editor.node import Node
 
 __all__ = [
-    "can_be_regex",
-    "make_regex",
-    "filter_ts",
-    "filter_ts_from_regex",
-    "filter_ops",
-    "filter_ops_from_regex",
-    "get_name_scope_ops",
-    "check_cios",
-    "get_ops_ios",
-    "compute_boundary_ts",
-    "get_within_boundary_ops",
-    "get_forward_walk_ops",
-    "get_backward_walk_ops",
-    "get_walks_intersection_ops",
-    "get_walks_union_ops",
-    "select_ops",
-    "select_ts",
-    "select_ops_and_ts",
+  "can_be_regex",
+  "make_regex",
+  "filter_ts",
+  "filter_ts_from_regex",
+  "filter_ops",
+  "filter_ops_from_regex",
+  "get_name_scope_ops",
+  "check_cios",
+  "get_ops_ios",
+  "compute_boundary_ts",
+  "get_within_boundary_ops",
+  "get_forward_walk_ops",
+  "get_backward_walk_ops",
+  "get_walks_intersection_ops",
+  "get_walks_union_ops",
+  "select_ops",
+  "select_ts",
+  "select_ops_and_ts",
+  "TreeExpr",
 ]
 
 _RE_TYPE = type(re.compile(""))
@@ -227,7 +231,7 @@ def check_cios(control_inputs=False, control_outputs=None, control_ios=None):
   if control_ios is not None:
     if not isinstance(control_ios, util.ControlOutputs):
       raise TypeError("Expected a gde.ControlOutputs, got: {}".format(
-          type(control_ios)))
+        type(control_ios)))
     if control_outputs is not None:
       raise ValueError("control_outputs should be None when using control_ios.")
     control_inputs = True
@@ -235,7 +239,7 @@ def check_cios(control_inputs=False, control_outputs=None, control_ios=None):
   elif control_outputs is not None:
     if not isinstance(control_outputs, util.ControlOutputs):
       raise TypeError("Expected a gde.ControlOutputs, got: {}".format(
-          type(control_outputs)))
+        type(control_outputs)))
 
   if control_outputs is not None:
     control_outputs.update()
@@ -430,7 +434,7 @@ def get_forward_walk_ops(seed_ops,
 
   def is_within(operator):
     return (within_ops is None or operator in within_ops) and (
-        within_ops_fn is None or within_ops_fn(operator))
+            within_ops_fn is None or within_ops_fn(operator))
 
   result = list(seed_ops)
   wave = set(seed_ops)
@@ -500,7 +504,7 @@ def get_backward_walk_ops(seed_ops,
 
   def is_within(operator):
     return (within_ops is None or operator in within_ops) and (
-        within_ops_fn is None or within_ops_fn(operator))
+            within_ops_fn is None or within_ops_fn(operator))
 
   result = list(seed_ops)
   wave = set(seed_ops)
@@ -568,17 +572,17 @@ def get_walks_intersection_ops(forward_seed_ops,
   control_inputs, control_outputs = check_cios(control_inputs, control_outputs,
                                                control_ios)
   forward_ops = get_forward_walk_ops(
-      forward_seed_ops,
-      inclusive=forward_inclusive,
-      within_ops=within_ops,
-      within_ops_fn=within_ops_fn,
-      control_outputs=control_outputs)
+    forward_seed_ops,
+    inclusive=forward_inclusive,
+    within_ops=within_ops,
+    within_ops_fn=within_ops_fn,
+    control_outputs=control_outputs)
   backward_ops = get_backward_walk_ops(
-      backward_seed_ops,
-      inclusive=backward_inclusive,
-      within_ops=within_ops,
-      within_ops_fn=within_ops_fn,
-      control_inputs=control_inputs)
+    backward_seed_ops,
+    inclusive=backward_inclusive,
+    within_ops=within_ops,
+    within_ops_fn=within_ops_fn,
+    control_inputs=control_inputs)
   return [op for op in forward_ops if op in backward_ops]
 
 
@@ -626,17 +630,17 @@ def get_walks_union_ops(forward_seed_ops,
   control_inputs, control_outputs = check_cios(control_inputs, control_outputs,
                                                control_ios)
   forward_ops = get_forward_walk_ops(
-      forward_seed_ops,
-      inclusive=forward_inclusive,
-      within_ops=within_ops,
-      within_ops_fn=within_ops_fn,
-      control_outputs=control_outputs)
+    forward_seed_ops,
+    inclusive=forward_inclusive,
+    within_ops=within_ops,
+    within_ops_fn=within_ops_fn,
+    control_outputs=control_outputs)
   backward_ops = get_backward_walk_ops(
-      backward_seed_ops,
-      inclusive=backward_inclusive,
-      within_ops=within_ops,
-      within_ops_fn=within_ops_fn,
-      control_inputs=control_inputs)
+    backward_seed_ops,
+    inclusive=backward_inclusive,
+    within_ops=within_ops,
+    within_ops_fn=within_ops_fn,
+    control_inputs=control_inputs)
   return util.concatenate_unique(forward_ops, backward_ops)
 
 
@@ -798,3 +802,123 @@ def select_ops_and_ts(*args, **kwargs):
   ops = select_ops(*args, restrict_ops_regex=False, **kwargs)
   ts = select_ts(*args, restrict_ts_regex=True, **kwargs)
   return ops, ts
+
+
+class TreeExpr(object):
+  """
+  Selection predicate that captures tree-shaped subgraphs a la the Graph
+  Transform Tool's `OpTypePattern` DSL.
+  """
+
+  def __init__(self,
+               alias: str = None,
+               op: str = None,
+               optional: bool = None,
+               inputs: Union["TreeExpr", Iterable["TreeExpr"]] = None,
+               ):
+    """
+    Args:
+      alias: Name to which to bind the core node of any matches of this
+       expression
+      op: Regular expression to apply to the op_type field of the root
+        node of any potential match.
+        A value of None here means "match any op_type value"
+      inputs: List of predicates on input nodes of the root node in the
+        matching tree. If the list is shorter than the number of inputs of
+        a node, only filters on the predicates provided.
+        A value of None means "don't filter on inputs"
+        Can also be single predicate, in which case it will be converted to a
+        one-element tuple.
+      optional: If True, match expressions that do not include this node but
+        do include any child nodes. Equivalent to "?" in a regular expression.
+        Defaults to False.
+    """
+    if isinstance(inputs, TreeExpr):
+      inputs = (inputs,)
+    if optional and len(inputs) > 1:
+      raise ValueError("'optional' flag only supported with zero or one "
+                       "inputs")
+    self._alias = alias
+    self._op_type_regex = None if op is None else make_regex(op)
+    self._input_exprs = inputs
+    self._optional = optional
+
+  def __repr__(self):
+    ret = "TreeExpr("
+    args = []
+    if self._alias is not None:
+      args.append("alias='{}'".format(self._alias))
+    if self._op_type_regex is not None:
+      args.append("op='{}'".format(self._op_type_regex))
+    if self._optional is not None:
+      args.append("optional={}".format(self._optional))
+    ret += ", ".join(args)
+    if self._input_exprs is not None:
+      if len(args) > 0:
+        ret += ", "
+      ret += "inputs=(\n"
+      ret += ",\n".join(
+        [textwrap.indent(repr(i), "  ") for i in self._input_exprs]
+      )
+      ret += ")"
+    ret += ")"
+    return ret
+
+  def __str__(self):
+    return repr(self)
+
+  def eval_from(self, potential_root_node: Node) -> Dict[str, Node]:
+    """
+    Evaluate a tree expression starting from a potential root node.
+
+    Args:
+      potential_root_node: Node to test for a match of the expression
+
+    Returns:
+      Returns a Dict mapping node alias to node instance if there is a match
+      at the indicated root.
+      Returns None if there is no match starting from the indicated root.
+    """
+    if potential_root_node.graph is None:
+      raise ValueError("TreeExpr evaluation hit a node that has been removed "
+                       "from the graph.\n"
+                       "Node is {}, and expression is:\n"
+                       "{}".format(potential_root_node, self))
+    result_at_root = self._eval_without_optional(potential_root_node)
+    if result_at_root is not None:
+      return result_at_root
+    elif self._optional:
+      # No match at this root, but maybe that's because this optional node of
+      # the tree isn't part of the current match.
+      return self._input_exprs[0].eval_from(potential_root_node)
+    else:
+      return None
+
+  def _eval_without_optional(self, potential_root_node: Node):
+    """
+    Handle every part of the expression except the "optional" clause.
+    """
+    result = {}
+    prn = potential_root_node
+    if self._op_type_regex is not None \
+            and self._op_type_regex.fullmatch(prn.op_type) is None:
+        # Failed to match on op_type
+        return None
+    if self._input_exprs is not None:
+      num_exprs = len(self._input_exprs)
+      inputs = prn.inputs
+      if num_exprs > len(inputs):
+        raise ValueError("Attempted to filter {} inputs of node {}, "
+                         "but node only has {} inputs."
+                         "".format(num_exprs, prn, len(inputs)))
+      for i in range(num_exprs):
+        input_result = self._input_exprs[i].eval_from(inputs[i].node)
+        if input_result is None:
+          # Failed to match on input
+          return None
+        result.update(input_result)
+    # If we get here, all predicates have passed
+    if self._alias is not None:
+      result[self._alias] = prn
+    return result
+

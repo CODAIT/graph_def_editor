@@ -99,7 +99,6 @@ class Tensor(object):
     for n in self.graph.nodes:
       if self in n.inputs:
         ret.append(n)
-
     return ret
 
   @property
@@ -129,3 +128,4 @@ class Tensor(object):
       # Invalidate any information the parent graph may have cached about
       # collections.
       self.node._graph.increment_version_counter()
+
