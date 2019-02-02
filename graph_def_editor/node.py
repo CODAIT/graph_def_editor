@@ -63,7 +63,6 @@ class Node(object):
         should be located. Default value of "" means "use the default device"
     """
     self._graph = g
-    self._ex_graph = None  # graph.Graph
     self._id = node_id
     self._name = name
     self._op_name = op_name
@@ -139,7 +138,6 @@ class Node(object):
     Sets this node's graph pointer to None. DOES NOT UPDATE POINTERS TO THIS
     NODE FROM THE PARENT GRAPH.
     """
-    self._ex_graph = self._graph
     self._graph = None
     # Don't need to update output tensors because they don't store a pointer
     # to the graph, only to the node

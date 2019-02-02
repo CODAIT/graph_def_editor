@@ -900,8 +900,8 @@ class TreeExpr(object):
     """
     result = {}
     prn = potential_root_node
-    if self._op_type_regex is not None:
-      if self._op_type_regex.fullmatch(prn.op_type) is None:
+    if self._op_type_regex is not None \
+            and self._op_type_regex.fullmatch(prn.op_type) is None:
         # Failed to match on op_type
         return None
     if self._input_exprs is not None:

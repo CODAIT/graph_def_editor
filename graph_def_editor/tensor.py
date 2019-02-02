@@ -128,4 +128,4 @@ class Tensor(object):
       # Invalidate any information the parent graph may have cached about
       # collections.
       self.node._graph.increment_version_counter()
-      
+

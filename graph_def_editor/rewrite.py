@@ -126,7 +126,7 @@ def _scale_weights(weights_node: node.Node,
     raise ValueError("Scale should be a vector, but has shape {}".format(
       scale.shape))
   if weights_node.op_type != "Const":
-    raise ValueError("Unexpected op type {} for weights_node".format(
+    raise TypeError("Unexpected op type {} for weights_node".format(
       weights_node.op_type))
 
   weights = weights_node.get_attr("value")
@@ -260,7 +260,7 @@ def _get_batch_norm_params(
     variance_epsilon = np.float64(batch_norm_node.get_attr("epsilon"))
     scale_after_normalization = True
   else:
-    raise ValueError("Unexpected op type {} for fused batch norm".format(
+    raise TypeError("Unexpected op type {} for fused batch norm".format(
       batch_norm_node.op_type))
   return (mean, variance, beta, gamma, variance_epsilon,
           scale_after_normalization)
