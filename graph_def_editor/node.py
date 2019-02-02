@@ -85,7 +85,7 @@ class Node(object):
     """
     return self._name
 
-  def change_name(self, new_name: str):
+  def _change_name(self, new_name: str):
     """
     THIS METHOD SHOULD ONLY BE CALLED BY THE PARENT GRAPH
 
@@ -131,7 +131,7 @@ class Node(object):
     """
     return self._id
 
-  def remove_from_graph(self):
+  def _remove_from_graph(self):
     """
     THIS METHOD TO BE CALLED ONLY BY THE PARENT GRAPH.
 

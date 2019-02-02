@@ -381,7 +381,8 @@ class Graph(object):
       name: name of the node to remove
     """
     n = self.get_node_by_name(name)
-    n.remove_from_graph()
+    # noinspection PyProtectedMember
+    n._remove_from_graph()
     del self._node_name_to_node[name]
     self.increment_version_counter()
     # Don't need to update collection info because collection membership is
@@ -401,7 +402,8 @@ class Graph(object):
       raise ValueError("Graph already has a node under name '{}'".format(
         new_name))
     n = self.get_node_by_name(old_name)
-    n.change_name(new_name)
+    # noinspection PyProtectedMember
+    n._change_name(new_name)
     del self._node_name_to_node[old_name]
     self._node_name_to_node[new_name] = n
     self.increment_version_counter()
