@@ -30,11 +30,10 @@ import os
 import tensorflow as tf
 import graph_def_editor as gde
 import numpy as np
-import PIL
+import PIL  # Pillow
 import shutil
 import tarfile
 import textwrap
-import keras
 import urllib.request
 
 from tensorflow.tools import graph_transforms
@@ -157,7 +156,17 @@ def run_graph(graph_proto, img: np.ndarray, input_node: str, output_node: str):
     with tf.Session() as sess:
       tf.import_graph_def(graph_proto, name="")
       result = sess.run(output_node + ":0", {input_node + ":0": img_as_batch})
-  print("Result is {}".format(result))
+
+  result = result.reshape(result.shape[1:])
+  # print("Raw result is {}".format(result))
+  sorted_indices = result.argsort()
+  # print("Top 5 indices: {}".format(sorted_indices[-5:]))
+
+  print("Rank      Label     Weight")
+  for i in range(5):
+    print("{:<10}{:<10}{}".format(i + 1, sorted_indices[-(i + 1)],
+                                  result[sorted_indices[-(i + 1)]]))
+
 
 def main(_):
   # Remove any detritus of previous runs of this script, but leave the temp
