@@ -211,6 +211,8 @@ def main(_):
 
   # Now run the GraphDef editor's fold_batch_norms_up() rewrite
   g = gde.Graph(after_tf_rewrites_graph_def)
+  gde.rewrite.fold_batch_norms(g)
+  gde.rewrite.fold_old_batch_norms(g)
   gde.rewrite.fold_batch_norms_up(g)
   after_gde_graph_def = g.to_graph_def(add_shapes=True)
 
@@ -223,7 +225,7 @@ def main(_):
     frozen_graph_def.node)))
   print("    Number of ops after built-in rewrites: {}".format(len(
     after_tf_rewrites_graph_def.node)))
-  print("Number of ops after fold_batch_norms_up(): {}".format(len(
+  print("Number of ops after GDE rewrites: {}".format(len(
     after_gde_graph_def.node)))
 
   # Run model before and after rewrite and compare results
@@ -238,7 +240,7 @@ def main(_):
   run_graph(frozen_graph_def, img, input_node, output_node)
   print("Results after built-in rewrites:")
   run_graph(after_tf_rewrites_graph_def, img, input_node, output_node)
-  print("Results after fold_batch_norms_up() rewrite:")
+  print("Results after GDE rewrites:")
   run_graph(after_gde_graph_def, img, input_node, output_node)
 
 
