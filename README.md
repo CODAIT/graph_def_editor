@@ -66,16 +66,22 @@ Result is:
 
 Current status:
 
-* All of the original project's regression tests pass.
-* The simple example script from the original project runs.
+* All of the original project's regression tests pass. We have added 20
+  additional regression tests to cover new functionality.
+* We have added new features to support graph rewrites, including structural
+  pattern matching and fixed-point graph modification.
+* We have implemented several new graph rewrites. 
+* The simple example script from the original project runs. We have also added
+  new examples of new functionality; see the `examples` directory.
 
 ## Contents of root directory:
 
 * `LICENSE`: This project is released under an Apache v2 license
 * `env`: Not in git repo; create by running `scripts/env.sh`. Anaconda virtualenv
   for running tests and notebooks in this project.
-* `examples`: Example scripts.  To run these scripts from the root directory use,
-  the command 
+* `examples`: Example scripts.  To run these scripts from the root directory
+   of this project, first run `scripts/env.sh` to create an Anaconda
+   environment, then use the command 
   ```
   PYTHONPATH=$PWD env/bin/python examples/script_name.py
   ```
@@ -87,6 +93,22 @@ Current status:
    [`setuptools`](https://setuptools.readthedocs.io/en/latest/)
 * `tests`: pytest tests. To run these tests, create `env` and run
   `scripts/test.sh`
+
+## Pip install instructions
+
+We have not yet posted a binary release of this library, but you can `pip
+install` this project directly from the source tree. We recommend using a 
+virtualenv or an Anaconda environment for this purpose. 
+Here is an example series of shell commands to create an Anaconda environment
+and `pip` install this project from source:
+
+```
+$ conda create -y --prefix ./myenv python=3.6 numpy tensorflow
+$ conda activate ./myenv
+$ git clone https://github.com/CODAIT/graph_def_editor.git
+$ pip install ./graph_def_editor
+```
+
 
 ## IDE setup instructions
 
