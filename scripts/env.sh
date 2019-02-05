@@ -45,7 +45,9 @@ conda create -y --prefix ./env \
     tensorflow \
     jupyterlab \
     pytest \
-    keras
+    keras \
+    pillow \
+    nomkl
 
 echo << EOM
 Anaconda virtualenv installed in ./env.

@@ -43,6 +43,7 @@ __all__ = [
   "load_variables_to_tf_graph",
   "make_const",
   "make_placeholder",
+  "make_simple_binary_op"
 ]
 
 
@@ -753,4 +754,36 @@ def make_identity(g: 'graph.Graph', name: str, input: 'tensor.Tensor',
   ret.set_inputs([input])
   ret.set_outputs_from_pairs([(input.dtype, input.shape)])
   ret.add_attr("T", input.dtype)
+  return ret
+
+
+def make_simple_binary_op(g: 'graph.Graph', name: str, op_name: str,
+                          input_1: tensor.Tensor, input_2: tensor.Tensor,
+                          dtype = None, uniquify_name: bool = False):
+  """
+  Convenience method to cover the common case of binary ops. To be used with
+  this pattern, ops must satisfy the following:
+    * Two inputs
+    * One output
+    * DType of output stored in an attribute called "T"
+
+  Args:
+    g: The graph that the node should be added to
+    name: Name for the new node
+    op_name: Name of the op to use at this node
+    input_1: First input tensor
+    input_2: Second input tensor
+    dtype: dtype returned; if None, will use the dtype of input_1
+    uniquify_name: if True, generate unique names by appending a numeric
+      suffix in the event of a name collision. Otherwise name collisions
+      result in an error.
+
+  Returns `gde.Node` object representing the new node.
+  """
+  if dtype is None:
+    dtype = input_1.dtype
+  ret = g.add_node(name, op_name, uniquify_name=uniquify_name)
+  ret.add_attr("T", dtype)
+  ret.set_inputs([input_1, input_2])
+  ret.infer_outputs()
   return ret

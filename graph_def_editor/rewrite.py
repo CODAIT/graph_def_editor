@@ -509,15 +509,19 @@ def fold_batch_norms_up(g: graph.Graph):
   """
   Identifies instances of the pattern
   ```
-     Mul => Add => (optional ReLU) => [Conv2D|MatMul|DepthwiseConv2d]
+     Mul => Add => (optional ReLU/ReLU6) => [Conv2D|MatMul|DepthwiseConv2d]
   ```
   and the equivalent pattern
   ```
-    FusedBatchNorm => (optional ReLU) => [Conv2D|MatMul|DepthwiseConv2d]
+    FusedBatchNorm => (optional ReLU/ReLU6) => [Conv2D|MatMul|DepthwiseConv2d]
   ```
   Then fuses the multiplication into the convolution's filter coefficients
   and applies a correction to the Add op to compensate for add happening
   before multiply.
+
+  If the nonlinearity is a ReLU6, replaces it with
+  ```
+    ReLU => Min(6 / multiplier from batch norm)
   """
   def compute_input_dim(n: node.Node):
     if n.op_type == "Conv2D" or n.op_type == "DepthwiseConv2dNative":
@@ -529,7 +533,7 @@ def fold_batch_norms_up(g: graph.Graph):
 
   pattern_1 = (
     TreeExpr(op="Conv2D|MatMul|DepthwiseConv2dNative", alias="conv", inputs=(
-      TreeExpr(op="Relu", optional=True, inputs=(
+      TreeExpr(op="Relu|Relu6", alias="relu", optional=True, inputs=(
         TreeExpr(op="Add", alias="add", inputs=(
           TreeExpr(op="Mul", alias="mul", inputs=(
             TreeExpr(),
@@ -540,6 +544,25 @@ def fold_batch_norms_up(g: graph.Graph):
       )),
       TreeExpr(op="Const", alias="weights")))
   )
+
+  def handle_relu6(relu6_op: node.Node, scale: np.ndarray):
+    """
+    Additional rewrite logic that replaces a ReLU6 op with a ReLU plus scaled
+    minumum.
+
+    Args:
+      relu6_op: Original Relu6
+      scale: Scale factor pulled from the batch normalization
+    """
+    # ReLU6 op: min(max(features, 0), 6). Add min() component to graph.
+    target_np_type = relu6_op.output(0).dtype.as_numpy_dtype
+    min_values = (6. / scale).astype(target_np_type)
+    min_node = util.make_simple_binary_op(
+      g, relu6_op.name + "/min", "Minimum", relu6_op.output(0),
+      util.make_const(g, relu6_op.name + "/min/const", min_values).output(0))
+    reroute.reroute_ts(min_node.output(0), relu6_op.output(0),
+                       cannot_modify=[min_node])
+    relu6_op.change_op_type("Relu")
 
   def action_1(_, match_info: Dict[str, node.Node]) -> bool:
     conv_node = match_info["conv"]
@@ -574,13 +597,16 @@ def fold_batch_norms_up(g: graph.Graph):
     if len(mul_values_node.outputs[0].consumers()) == 0:
       g.remove_node_by_name(mul_values_node.name)
 
+    if "relu" in match_info and match_info["relu"].op_type == "Relu6":
+      handle_relu6(match_info["relu"], scale)
+
     return True
 
   _fixed_point_apply(pattern_1, action_1, g)
 
   pattern_2 = (
     TreeExpr(op="Conv2D|MatMul|DepthwiseConv2dNative", alias="conv", inputs=(
-      TreeExpr(op="Relu", optional=True, inputs=(
+      TreeExpr(op="Relu|Relu6", alias="relu", optional=True, inputs=(
         TreeExpr(op="FusedBatchNorm", alias="batch_norm", inputs=(
             TreeExpr(),
             TreeExpr(op="Const"),
@@ -612,6 +638,9 @@ def fold_batch_norms_up(g: graph.Graph):
     # pulled above the fused batch norm's embedded addition.
     offset /= scale
     _replace_batch_norm_with_bias_add(g, match_info, offset)
+
+    if "relu" in match_info and match_info["relu"].op_type == "Relu6":
+      handle_relu6(match_info["relu"], scale)
 
     return True
 
