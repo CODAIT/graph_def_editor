@@ -26,7 +26,7 @@ setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     packages=find_packages(),
-    install_requires=['numpy<=1.14.5', 'tensorflow', 'six'],
+    install_requires=['numpy', 'tensorflow', 'six'],
     include_package_data=True,
     zip_safe=False,
     classifiers=[
