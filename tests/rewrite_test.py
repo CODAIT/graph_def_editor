@@ -679,10 +679,8 @@ class RewriteTest(unittest.TestCase):
     self.assertClose(original_outputs, fused_outputs, delta=1e-5)
 
     # Make sure input to Relu6 op was large enough to trigger the "6" part.
-    print("Relu6 inputs on original graph are:\n{}".format(relu6_inputs))
     self.assertTrue(np.any(relu6_inputs > 6.))
 
     # Make sure the rewrite happened
     for n in g.nodes:
       self.assertNotEqual(n.op_type, "FusedBatchNorm")
-

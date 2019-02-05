@@ -137,9 +137,9 @@ def _scale_weights(weights_node: node.Node,
 
   scaled_weights = np.float64(weights)
   for col in range(scale.shape[0]):
-    indexes = [col if i == dim else slice(None)
-               for i in range(len(weights.shape))]
-    scaled_weights[tuple(indexes)] *= scale[col]
+    indexes = tuple(col if i == dim else slice(None)
+                    for i in range(len(weights.shape)))
+    scaled_weights[indexes] *= scale[col]
 
   # Cast down to the original precision
   scaled_weights = scaled_weights.astype(weights.dtype)
