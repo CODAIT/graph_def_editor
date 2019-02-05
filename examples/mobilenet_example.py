@@ -18,6 +18,8 @@
 Example of using the GraphDef editor and the Graph Transform Tool to prep a
 copy of MobileNetV2 for inference.
 
+Requires that the "Pillow" package be installed.
+
 To run this example from the root of the project, type:
    PYTHONPATH=$PWD env/bin/python examples/mobilenet_example.py
 """
@@ -30,6 +32,7 @@ import os
 import tensorflow as tf
 import graph_def_editor as gde
 import numpy as np
+# noinspection PyPackageRequirements
 import PIL  # Pillow
 import shutil
 import tarfile
