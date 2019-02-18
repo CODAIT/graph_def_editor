@@ -443,11 +443,8 @@ class RewriteTest(unittest.TestCase):
                        delta=(2e-5 if channel_multiplier_is_one else 4e-5))
 
       # Make sure the rewrite happened.
-      found_batch_norm = False
       for n in g.nodes:
-        if n.op_type == "FusedBatchNorm":
-          found_batch_norm = True
-      self.assertFalse(found_batch_norm)
+        self.assertNotEqual(n.op_type, "FusedBatchNorm")
 
     run_test(False)
     run_test(True)
