@@ -110,7 +110,7 @@ def _fixed_point_apply(pattern: TreeExpr,
 
 def _scale_weights(weights_node: node.Node,
                    scale: np.ndarray,
-                   dim: int):
+                   dims: Tuple[int]):
   """
   Multiply each row/column/dimension of a set of constant weights by a
   scaling factor, in place.
@@ -119,27 +119,36 @@ def _scale_weights(weights_node: node.Node,
     weights_node: Const node containing weights
     scale: Array where each entry contains a scale factor for a slice of
       the weights tensor in weights_node
-    dim: Dimension of the weights along which the scale factor should be
+    dims: Dimensions of the weights along which the scale factor should be
       applied.
   """
-  if len(scale.shape) != 1:
-    raise ValueError("Scale should be a vector, but has shape {}".format(
-      scale.shape))
+  if len(dims) != len(scale.shape):
+    raise ValueError("Target dimensions {} not compatible with shape of "
+                     "scale array {}".format(dims, scale))
   if weights_node.op_type != "Const":
     raise TypeError("Unexpected op type {} for weights_node".format(
       weights_node.op_type))
 
   weights = weights_node.get_attr("value")
-  if scale.shape[0] != weights.shape[dim]:
-    raise ValueError("Scale vector of shape {} can't be applied along "
-                     "dimension {} of a weights vector of shape "
-                     "{}".format(scale.shape, dim, weights.shape))
+  for i in range(len(dims)):
+    if scale.shape[i] != weights.shape[dims[i]]:
+      raise ValueError("Scale vector of shape {} can't be applied along "
+                       "dimensions {} of a weights vector of shape "
+                       "{}".format(scale.shape, dims, weights.shape))
+
+  def compute_target_multi_index(scale_multi_index):
+    ret = [slice(None)] * len(weights.shape)
+    for d in range(len(dims)):
+      ret[dims[d]] = scale_multi_index[d]
+    return tuple(ret)
 
   scaled_weights = np.float64(weights)
-  for col in range(scale.shape[0]):
-    indexes = tuple(col if i == dim else slice(None)
-                    for i in range(len(weights.shape)))
-    scaled_weights[indexes] *= scale[col]
+  itr = np.nditer(scale, flags=["multi_index"])
+  while not itr.finished:
+    scale_factor = np.float64(itr[0])
+    target_coords = compute_target_multi_index(itr.multi_index)
+    scaled_weights[target_coords] *= scale_factor
+    itr.iternext()
 
   # Cast down to the original precision
   scaled_weights = scaled_weights.astype(weights.dtype)
@@ -154,8 +163,8 @@ def _add_scale_to_conv_weights(conv_node: node.Node,
   """
   Subroutine of fold_batch_norms() and fold_old_batch_norms().
 
-  Extract the weights from a Conv2D or MatMul op, multiply by scaling
-  factors, and put the resulting scaled weights in place.
+  Extract the weights from a Conv2D, DepthwiseConv2D, or MatMul op, multiply by
+  scaling factors, and put the resulting scaled weights in place.
 
   Args:
     conv_node: Conv2D/MatMul node to be rewritten
@@ -164,11 +173,22 @@ def _add_scale_to_conv_weights(conv_node: node.Node,
     scale: Array where each entry contains a scale factor for the
       corresponding output column of conv_node
   """
-  if conv_node.op_type not in ("Conv2D", "MatMul"):
+  # Each type of convolution
+  if conv_node.op_type == "DepthwiseConv2dNative":
+    # Dimensions 2 and 3 of the the filters are input channel and multiplier
+    # index, respectively.
+    weights_shape = weights_node.output(0).shape
+    num_input_channels = weights_shape[2]
+    channel_multiplier = weights_shape[3]
+    scale = scale.reshape([num_input_channels, channel_multiplier])
+    _scale_weights(weights_node, scale, [2, 3])
+  elif conv_node.op_type == "Conv2D":
+    _scale_weights(weights_node, scale, [3])
+  elif conv_node.op_type == "MatMul":
+    _scale_weights(weights_node, scale, [1])
+  else:
     raise ValueError("Unexpected op type {} for conv_node".format(
       conv_node.op_type))
-  weights_cols_index = 3 if conv_node.op_type == "Conv2D" else 1
-  _scale_weights(weights_node, scale, weights_cols_index)
 
 
 def fold_batch_norms(g: graph.Graph):
@@ -179,9 +199,12 @@ def fold_batch_norms(g: graph.Graph):
   multiplication into the convolution's filter coefficients. This pattern
   occurs as a result of `Conv2D => BatchNorm` turning into
   `Conv2D => Mul => Add` when a multi-op batch normalization is used.
+
+  Also covers the related cases when the `Conv2D` is replaced with a `MatMul`
+  or a `DepthwiseConv2D`
   """
   pattern = TreeExpr(op="Mul", alias="mul", inputs=(
-    TreeExpr(op="Conv2D|MatMul", alias="conv", inputs=(
+    TreeExpr(op="Conv2D|MatMul|DepthwiseConv2dNative", alias="conv", inputs=(
       TreeExpr(),
       TreeExpr(op="Const", alias="weights")
     )),
@@ -372,6 +395,9 @@ def fold_old_batch_norms(g: graph.Graph):
   This rewrite looks for instances of the pattern `Conv2D => [batch norm]`,
   where [batch norm] is a fused batch normalization operator.
 
+  The rewrite also covers instances of `DepthwiseConv2D => [batch norm]` when
+  the channel multiplier of the DepthwiseConv2D op is 1.
+
   The TF documentation says that this rewrite is only for graphs produced by
   legacy code, but this is not true. As of January 2019, the most recent
   version of TensorFlow produces fused batch normalization operators by default.
@@ -389,7 +415,7 @@ def fold_old_batch_norms(g: graph.Graph):
   pattern_1 = TreeExpr(
     op="BatchNormWithGlobalNormalization|FusedBatchNorm",
     alias="batch_norm", inputs=(
-      TreeExpr(op="Conv2D", alias="conv", inputs=(
+      TreeExpr(op="Conv2D|DepthwiseConv2dNative", alias="conv", inputs=(
           TreeExpr(),
           TreeExpr(op="Const", alias="weights")
         )),
@@ -415,12 +441,12 @@ def fold_old_batch_norms(g: graph.Graph):
 
   _fixed_point_apply(pattern_1, action_1, g)
 
-  # PASS 2: Conv2D => BatchToSpaceND => [batch norm]
+  # PASS 2: Conv2D|DepthwiseConv2D => BatchToSpaceND => [batch norm]
   pattern_2 = TreeExpr(
     op="BatchNormWithGlobalNormalization|FusedBatchNorm",
     alias="batch_norm", inputs=(
       TreeExpr(op="BatchToSpaceND", alias="batch_to_space", inputs=(
-        TreeExpr(op="Conv2D", alias="conv", inputs=(
+        TreeExpr(op="Conv2D|DepthwiseConv2dNative", alias="conv", inputs=(
           TreeExpr(),
           TreeExpr(op="Const", alias="weights")
         )))),
@@ -580,7 +606,7 @@ def fold_batch_norms_up(g: graph.Graph):
 
     # Scale the weights to compensate for unscaled inputs.
     scale = np.float64(mul_values_node.get_attr("value"))
-    _scale_weights(weights_node, scale, compute_input_dim(conv_node))
+    _scale_weights(weights_node, scale, [compute_input_dim(conv_node)])
 
     # Divide the additive factor to compensate for the multiplication being
     # pulled above the Add.
@@ -632,7 +658,7 @@ def fold_batch_norms_up(g: graph.Graph):
     scale, offset = _get_scale_and_offset(match_info)
 
     # Scale the weights to compensate for unscaled inputs.
-    _scale_weights(weights_node, scale, compute_input_dim(conv_node))
+    _scale_weights(weights_node, scale, [compute_input_dim(conv_node)])
 
     # Divide the additive factor to compensate for the multiplication being
     # pulled above the fused batch norm's embedded addition.
