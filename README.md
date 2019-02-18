@@ -87,7 +87,7 @@ Current status:
   ```
   where `script_name.py` is the name of the example script.
 * `notebooks`: Jupyter notebooks.
-* `graph\_def\_editor`: Source code for the Python package
+* `graph_def_editor`: Source code for the Python package
 * `scripts`: Useful shell scripts for development.
 * `setup.py`: Setup script to make this project pip-installable with 
    [`setuptools`](https://setuptools.readthedocs.io/en/latest/)
