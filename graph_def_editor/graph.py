@@ -1216,7 +1216,8 @@ def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
       collection_type = tf.Operation
     elif issubclass(first_item_type, tf.Tensor):
       collection_type = tf.Tensor
-    elif first_item_type.__name__ in ("WhileContext", "CondContext"):
+    elif first_item_type.__name__ in ("WhileContext", "CondContext", "Saver") \
+        or issubclass(first_item_type, tf.train.QueueRunner):
       print("Skipping collection {} of type {}.".format(
         collection_name, first_item_type))
       # TODO(frreiss): Should we serialize WhileContexts or CondContexts?
