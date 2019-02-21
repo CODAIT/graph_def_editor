@@ -165,7 +165,7 @@ class Variable(object):
     # reference tensors.
     if not self.graph.contains_node(self._initializer_name):
       raise ValueError("Initializer name '{}' does not correspond to any "
-                       "node in graph")
+                       "node in graph".format(self._initializer_name))
     _ = self.graph.get_tensor_by_name(self._initial_value_name,
                                       "Invalid initial value name '{}': {}")
     _ = self.graph.get_tensor_by_name(self._snapshot_name,
