@@ -110,7 +110,7 @@ class Graph(object):
 
   def __init__(self, g: Union[tf.Graph, tf.GraphDef] = None,
                name: str = None,
-               collections: Iterable[tf.MetaGraphDef.CollectionDefEntry] = None,
+               collections: Dict[str, meta_graph_pb2.CollectionDef] = None,
                saver_info: SaverInfo = None,
                signature_info: SignatureInfo = None):
     """
@@ -139,7 +139,8 @@ class Graph(object):
     elif isinstance(g, tf.Graph):
       graph_def = g.as_graph_def()
       if collections is None:
-        collections = _make_collection_defs(g)
+        meta_gd = tf.train.export_meta_graph(graph=g)
+        collections = _extract_collection_defs(meta_gd)
     else:
       raise TypeError("Graph is of type {}. Expected a tf.Graph or GraphDef "
                       "proto".format(type(g)))
@@ -178,8 +179,8 @@ class Graph(object):
                                                   set_control_inputs=True)
     # Collections reference nodes and variables
     if collections is not None:
-      for c in collections:
-        self.add_collection_from_collection_def(c)
+      for k, c in collections.items():
+        self.add_collection_from_collection_def(k, c)
 
     # Presence of a passthrough saver prevents adding additional variables,
     # so load after variables are constituted (i.e. from collections)
@@ -223,7 +224,8 @@ class Graph(object):
 
   def add_collection_from_collection_def(
           self,
-          collection_def: tf.MetaGraphDef.CollectionDefEntry,
+          collection_name: str,
+          collection_def: meta_graph_pb2.CollectionDef,
           validate_name: bool = True):
     """
     Unpack a `tf.MetaGraphDef.CollectionDefEntry` of serialized variables 
@@ -231,37 +233,36 @@ class Graph(object):
     Variables that do not already exist will be created.
     
     Args:
+      collection_name: Name of collection
       collection_def: Serialized information about the collection
       validate_name: Verify that a collection by this name doesn't already
         exist. Set this argument to False to avoid O(n^2) behavior when
         bulk-loading known-good collection metadata.
     """
-    collection_name = collection_def.key
     if validate_name and collection_name in self.get_all_collection_keys():
       raise ValueError("Collection '{}' already exists".format(collection_name))
-    collection = collection_def.value
     # The collection is stored in exactly one of five different formats.
-    if collection.HasField("node_list"):
-      for node_name in collection.node_list.value:
+    if collection_def.HasField("node_list"):
+      for node_name in collection_def.node_list.value:
         # Check if node name is a Tensor type
         if node_name.rfind(':') > -1:
           n = self.get_tensor_by_name(node_name)
         else:
           n = self.get_node_by_name(node_name)
         n.add_to_collection(collection_name)
-    elif collection.HasField("bytes_list"):
-      for serialized_var in collection.bytes_list.value:
+    elif collection_def.HasField("bytes_list"):
+      for serialized_var in collection_def.bytes_list.value:
         var = self.add_variable_from_variable_def(serialized_var,
                                                   skip_if_present=True)
         var.add_to_collection(collection_name)
-    elif (collection.HasField("int64_list")
-          or collection.HasField("float_list")
-          or collection.HasField("any_list")):
-      self._passthrough_collections[collection_name] = collection
+    elif (collection_def.HasField("int64_list")
+          or collection_def.HasField("float_list")
+          or collection_def.HasField("any_list")):
+      self._passthrough_collections[collection_name] = collection_def
       if self._collection_name_to_type is not None:
         self._collection_name_to_type[collection_name] = "passthrough"
     else:
-      raise ValueError("Unknown collection type: {}".format(collection))
+      raise ValueError("Unknown collection with name: {}".format(collection_name))
 
   def __getitem__(self, name: str) -> Union[tensor.Tensor, 'node.Node']:
     """
@@ -1129,13 +1130,7 @@ def saved_model_to_graph(saved_model_path: str, tag: str = None,
 
   # Decompose the MetaGraphDef into the serialized components of the graph
   graph_def = meta_graph.graph_def
-  collections = []
-  for collection_name in meta_graph.collection_def:
-    collection_proto = tf.MetaGraphDef.CollectionDefEntry()
-    collection_proto.key = collection_name
-    collection_proto.value.CopyFrom(
-      meta_graph.collection_def[collection_name])
-    collections.append(collection_proto)
+  collections = _extract_collection_defs(meta_graph)
   if include_saver and meta_graph.HasField("saver_def"):
     saver_info = SaverInfo(_vars_dir_for_saved_model(saved_model_path),
                            meta_graph.saver_def)
@@ -1188,75 +1183,22 @@ def _decode_graph(graph_def):
   return output_map
 
 
-def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
-  tf.MetaGraphDef.CollectionDefEntry]:
-  """
-  Convenience function to serialize all the collections in a TensorFlow graph.
+def _extract_collection_defs(meta_graph: tf.MetaGraphDef) -> Dict[
+  str, meta_graph_pb2.CollectionDef]:
 
-  Args:
-    tf_g: TensorFlow graph from which to harvest collections
-
-  Returns a list of `tf.MetaGraphDef.CollectionDefEntry` protobuf containing
-  the serialized contents of the collections.
-  """
-  ret = []
-  for collection_name in tf_g.collections:
+  collections = {}
+  for collection_name in meta_graph.collection_def:
     if type(collection_name) is not str:
       print("Skipping non-string collection name {}".format(collection_name))
       continue
-    collection_items = tf_g.get_collection(collection_name)
-    collection_proto = tf.MetaGraphDef.CollectionDefEntry()
-    collection_proto.key = collection_name
-    if len(collection_items) == 0:
-      continue
-    first_item_type = type(collection_items[0])
-    if issubclass(first_item_type, tf.Variable):
-      collection_type = tf.Variable
-    elif issubclass(first_item_type, tf.Operation):
-      collection_type = tf.Operation
-    elif issubclass(first_item_type, tf.Tensor):
-      collection_type = tf.Tensor
-    elif first_item_type.__name__ in ("WhileContext", "CondContext"):
-      print("Skipping collection {} of type {}.".format(
-        collection_name, first_item_type))
+    elif collection_name in (
+            "while_context", "cond_context", "savers", "queue_runners"):
+      print("Skipping collection {}".format(collection_name))
       # TODO(frreiss): Should we serialize WhileContexts or CondContexts?
       continue
-    else:
-      raise NotImplementedError("Can't serialize item '{}' in collection "
-                                "'{}' because it is a "
-                                "'{}'.".format(collection_items[0],
-                                               collection_name,
-                                               first_item_type.__name__))
+    collections[collection_name] = meta_graph.collection_def[collection_name]
 
-    # Make sure that everything in the collection is of the same type.
-    for item in collection_items:
-      if not isinstance(item, collection_type):
-        raise TypeError("Item '{}' in collection "
-                        "'{}' is of unexpected type "
-                        "'{}' (should be subclass of "
-                        "{}).".format(item, collection_name,
-                                      type(item), collection_type))
-
-    if collection_type is tf.Variable:
-      for item in collection_items:
-        # Ask TensorFlow to generate the protobuf version of this variable
-        var_proto = item.to_proto()
-
-        # TensorFlow stores variables as binary serialized objects for some
-        # reason.
-        collection_proto.value.bytes_list.value.append(
-          var_proto.SerializeToString())
-    elif collection_type in (tf.Operation, tf.Tensor):
-      # Collection of nodes or tensors; store as node/tensor names
-      for item in collection_items:
-        collection_proto.value.node_list.value.append(
-          tf.compat.as_bytes(item.name))
-    else:
-      raise NotImplementedError("Unexpected collection type {}".format(
-        collection_type))
-
-    ret.append(collection_proto)
-  return ret
+  return collections
 
 
 def _decode_tensor_name(tensor_name: str, error_msg: str):
