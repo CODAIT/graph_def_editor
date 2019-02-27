@@ -85,11 +85,11 @@ def _get_input_ts(ops):
   """Compute the list of unique input tensors of all the op in ops.
 
   Args:
-    ops: an object convertible to a list of `tf.Operation`.
+    ops: an object convertible to a list of `gde.Node`.
   Returns:
     The list of unique input tensors of all the op in ops.
   Raises:
-    TypeError: if ops cannot be converted to a list of `tf.Operation`.
+    TypeError: if ops cannot be converted to a list of `gde.Node`.
   """
   ops = util.make_list_of_op(ops)
   ts = []
@@ -106,11 +106,11 @@ def _get_output_ts(ops):
   """Compute the list of unique output tensors of all the op in ops.
 
   Args:
-    ops: an object convertible to a list of tf.Operation.
+    ops: an object convertible to a list of `gde.Node`.
   Returns:
     The list of unique output tensors of all the op in ops.
   Raises:
-    TypeError: if ops cannot be converted to a list of tf.Operation.
+    TypeError: if ops cannot be converted to a list of `gde.Node`.
   """
   ops = util.make_list_of_op(ops)
   ts = []
@@ -123,13 +123,13 @@ def filter_ts(ops, positive_filter):
   """Get all the tensors which are input or output of an op in ops.
 
   Args:
-    ops: an object convertible to a list of `tf.Operation`.
+    ops: an object convertible to a list of `gde.Node`.
     positive_filter: a function deciding whether to keep a tensor or not.
       If `True`, all the tensors are returned.
   Returns:
-    A list of `tf.Tensor`.
+    A list of `gde.Tensor`.
   Raises:
-    TypeError: if ops cannot be converted to a list of `tf.Operation`.
+    TypeError: if ops cannot be converted to a list of `gde.Node`.
   """
   ops = util.make_list_of_op(ops)
   ts = _get_input_ts(ops)
@@ -143,14 +143,14 @@ def filter_ts_from_regex(ops, regex):
   r"""Get all the tensors linked to ops that match the given regex.
 
   Args:
-    ops: an object convertible to a list of tf.Operation.
+    ops: an object convertible to a list of `gde.Node`.
     regex: a regular expression matching the tensors' name.
       For example, "^foo(/.*)?:\d+$" will match all the tensors in the "foo"
       scope.
   Returns:
-    A list of tf.Tensor.
+    A list of `gde.Tensor`.
   Raises:
-    TypeError: if ops cannot be converted to a list of tf.Operation.
+    TypeError: if ops cannot be converted to a list of `gde.Node`.
   """
   ops = util.make_list_of_op(ops)
   regex_obj = make_regex(regex)
@@ -161,13 +161,13 @@ def filter_ops(ops, positive_filter):
   """Get the ops passing the given filter.
 
   Args:
-    ops: an object convertible to a list of gde.Node.
+    ops: an object convertible to a list of `gde.Node`.
     positive_filter: a function deciding where to keep an operation or not.
       If True, all the operations are returned.
   Returns:
-    A list of selected gde.Node.
+    A list of selected `gde.Node`.
   Raises:
-    TypeError: if ops cannot be converted to a list of gde.Node.
+    TypeError: if ops cannot be converted to a list of `gde.Node`.
   """
   ops = util.make_list_of_op(ops)
   if positive_filter is not True:  # pylint: disable=g-explicit-bool-comparison
@@ -180,10 +180,10 @@ def filter_ops_by_optype(ops, op_types: Union[str, List[str], Tuple[str]]):
   Filter out all ops that do not have op types in a provided list of types.
 
   Args:
-    ops: an object convertible to a list of gde.Node.
+    ops: an object convertible to a list of `gde.Node`.
     op_types: Either a single op type string or a list/tuple of them
 
-  Returns a list of the gde.Nodes that have one of the indicated optypes
+  Returns a list of the `gde.Node`s that have one of the indicated optypes
   """
   if isinstance(op_types, str):
     op_types = [op_types]
@@ -212,12 +212,12 @@ def get_name_scope_ops(ops, scope):
   """Get all the operations under the given scope path.
 
   Args:
-    ops: an object convertible to a list of gde.Node.
+    ops: an object convertible to a list of `gde.Node`.
     scope: a scope path.
   Returns:
-    A list of gde.Node.
+    A list of `gde.Node`.
   Raises:
-    TypeError: if ops cannot be converted to a list of gde.Node.
+    TypeError: if ops cannot be converted to a list of `gde.Node`.
   """
   if scope and scope[-1] == "/":
     scope = scope[:-1]
@@ -317,7 +317,7 @@ def compute_boundary_ts(ops):
     Since a tensor can be both an inside tensor and an output tensor,
     `outside_output_ts` and `inside_ts` might intersect.
   Raises:
-    TypeError: if ops cannot be converted to a list of gde.Node.
+    TypeError: if ops cannot be converted to a list of `gde.Node`.
   """
   ops = util.make_list_of_op(ops)
   input_ts = _get_input_ts(ops)
@@ -358,7 +358,7 @@ def get_within_boundary_ops(ops,
 
   Args:
     ops: an object convertible to a list of `gde.Node`. those ops define the
-      set in which to perform the operation (if a `tf.Graph` is given, it
+      set in which to perform the operation (if a `gde.Graph` is given, it
       will be converted to the list of all its operations).
     seed_ops: the operations from which to start expanding.
     boundary_ops: the ops forming the boundary.
@@ -565,7 +565,7 @@ def get_walks_intersection_ops(forward_seed_ops,
       resulting set.
     backward_inclusive: if True the given backward_seed_ops are also part of the
       resulting set.
-    within_ops: an iterable of gde.Node within which the search is
+    within_ops: an iterable of `gde.Node` within which the search is
       restricted. If within_ops is None, the search is performed within
       the whole graph.
     within_ops_fn: if provided, a function on ops that should return True iff
@@ -579,7 +579,7 @@ def get_walks_intersection_ops(forward_seed_ops,
       control_inputs to True and control_outputs to the util.ControlOutputs
       instance.
   Returns:
-    A Python set of all the gde.Node in the intersection of a forward and a
+    A Python set of all the `gde.Node` in the intersection of a forward and a
       backward walk.
   Raises:
     TypeError: if `forward_seed_ops` or `backward_seed_ops` or `within_ops`
@@ -637,11 +637,11 @@ def get_walks_union_ops(forward_seed_ops,
       control_inputs to True and control_outputs to the util.ControlOutputs
       instance.
   Returns:
-    A Python set of all the gde.Node in the union of a forward and a
+    A Python set of all the `gde.Node` in the union of a forward and a
       backward walk.
   Raises:
     TypeError: if forward_seed_ops or backward_seed_ops or within_ops cannot be
-      converted to a list of gde.Node.
+      converted to a list of `gde.Node`.
   """
   control_inputs, control_outputs = check_cios(control_inputs, control_outputs,
                                                control_ios)
@@ -665,8 +665,8 @@ def select_ops(*args, **kwargs):
 
   Args:
     *args: list of 1) regular expressions (compiled or not) or 2) (array of)
-      `gde.Node`. `tf.Tensor` instances are silently ignored.
-    **kwargs: 'graph': `tf.Graph` in which to perform the regex query.This is
+      `gde.Node`. `gde.Tensor` instances are silently ignored.
+    **kwargs: 'graph': `gde.Graph` in which to perform the regex query.This is
       required when using regex.
       'positive_filter': an elem if selected only if `positive_filter(elem)` is
         `True`. This is optional.
@@ -675,9 +675,9 @@ def select_ops(*args, **kwargs):
   Returns:
     A list of `gde.Node`.
   Raises:
-    TypeError: if the optional keyword argument graph is not a `tf.Graph`
+    TypeError: if the optional keyword argument graph is not a `gde.Graph`
       or if an argument in args is not an (array of) `gde.Node`
-      or an (array of) `tf.Tensor` (silently ignored) or a string
+      or an (array of) `gde.Tensor` (silently ignored) or a string
       or a regular expression.
     ValueError: if one of the keyword arguments is unexpected or if a regular
       expression is used without passing a graph as a keyword argument.
@@ -690,7 +690,7 @@ def select_ops(*args, **kwargs):
     if k == "graph":
       g = v
       if g is not None and not isinstance(g, Graph):
-        raise TypeError("Expected a tf.Graph, got: {}".format(type(g)))
+        raise TypeError("Expected a gde.Graph, got: {}".format(type(g)))
     elif k == "positive_filter":
       positive_filter = v
     elif k == "restrict_ops_regex":
@@ -731,18 +731,18 @@ def select_ts(*args, **kwargs):
 
   Args:
     *args: list of 1) regular expressions (compiled or not) or 2) (array of)
-      `tf.Tensor`. `gde.Node` instances are silently ignored.
-    **kwargs: 'graph': `tf.Graph` in which to perform the regex query.This is
+      `gde.Tensor`. `gde.Node` instances are silently ignored.
+    **kwargs: 'graph': `gde.Graph` in which to perform the regex query.This is
       required when using regex.
       'positive_filter': an elem if selected only if `positive_filter(elem)` is
         `True`. This is optional.
       'restrict_ts_regex': a regular expression is ignored if it doesn't start
         with the substring "(?#ts)".
   Returns:
-    A list of `tf.Tensor`.
+    A list of `gde.Tensor`.
   Raises:
-    TypeError: if the optional keyword argument graph is not a `tf.Graph`
-      or if an argument in args is not an (array of) `tf.Tensor`
+    TypeError: if the optional keyword argument graph is not a `gde.Graph`
+      or if an argument in args is not an (array of) `gde.Tensor`
       or an (array of) `gde.Node` (silently ignored) or a string
       or a regular expression.
     ValueError: if one of the keyword arguments is unexpected or if a regular
@@ -797,10 +797,10 @@ def select_ops_and_ts(*args, **kwargs):
 
   Args:
     *args: list of 1) regular expressions (compiled or not) or 2) (array of)
-      `gde.Node` 3) (array of) gde.Tensor. Regular expressions matching
+      `gde.Node` 3) (array of) `gde.Tensor`. Regular expressions matching
       tensors must start with the comment `"(?#ts)"`, for instance:
       `"(?#ts)^foo/.*"`.
-    **kwargs: 'graph': `tf.Graph` in which to perform the regex query.This is
+    **kwargs: 'graph': `gde.Graph` in which to perform the regex query.This is
       required when using regex.
       'positive_filter': an elem if selected only if `positive_filter(elem)` is
         `True`. This is optional.
@@ -809,7 +809,7 @@ def select_ops_and_ts(*args, **kwargs):
       `ops` is a list of `gde.Node`, and
       `ts` is a list of `gde.Tensor`
   Raises:
-    TypeError: if the optional keyword argument graph is not a `tf.Graph`
+    TypeError: if the optional keyword argument graph is not a `gde.Graph`
       or if an argument in args is not an (array of) `gde.Tensor`
       or an (array of) `gde.Node` or a string or a regular expression.
     ValueError: if one of the keyword arguments is unexpected or if a regular

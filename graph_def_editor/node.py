@@ -203,7 +203,7 @@ class Node(object):
     Set all inputs at once, removing anything that was there previously.
 
     Args:
-      new_inputs: Iterable of `Tensor` objects in this node's parent graph
+      new_inputs: Iterable of `gde.Tensor` objects in this node's parent graph
     """
     for t in new_inputs:
       if t.graph != self.graph:

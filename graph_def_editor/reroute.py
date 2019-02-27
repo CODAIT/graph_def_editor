@@ -100,11 +100,11 @@ def _reroute_t(t0, t1, consumers1, can_modify=None, cannot_modify=None):
   """Reroute the end of the tensors (t0,t1).
 
   Warning: this function is directly manipulating the internals of the
-  `tf.Graph`.
+  `gde.Graph`.
 
   Args:
-    t0: a tf.Tensor.
-    t1: a tf.Tensor.
+    t0: a `gde.Tensor`.
+    t1: a `gde.Tensor`.
     consumers1: The consumers of t1 which needs to be rerouted.
     can_modify: iterable of operations which can be modified. Any operation
       outside within_ops will be left untouched by this function.
@@ -134,7 +134,7 @@ def _reroute_ts(ts0, ts1, mode, can_modify=None, cannot_modify=None):
   """Reroute the end of the tensors in each pair (t0,t1) in ts0 x ts1.
 
   This function is the back-bone of the Graph-Editor. It is essentially a thin
-  wrapper on top of the tf.Operation._update_input.
+  wrapper on top of `gde.Node.replace_input`.
 
   Given a pair of tensor t0, t1 in ts0 x ts1, this function re-route the end
   of t0 and t1 in three possible ways:
@@ -156,11 +156,11 @@ def _reroute_ts(ts0, ts1, mode, can_modify=None, cannot_modify=None):
   output tensors, ever. But it is possible to detach an op from its input
   tensors, which is what this function concerns itself with.
 
-  Warning: this function is directly manipulating the internals of the tf.Graph.
+  Warning: this function is directly manipulating the internals of the `gde.Graph`.
 
   Args:
-    ts0: an object convertible to a list of `tf.Tensor`.
-    ts1: an object convertible to a list of `tf.Tensor`.
+    ts0: an object convertible to a list of `gde.Tensor`.
+    ts1: an object convertible to a list of `gde.Tensor`.
     mode: what to do with those tensors: "a<->b" or "b<->a" for swapping and
       "a->b" or "b->a" for one direction re-routing.
     can_modify: iterable of operations which can be modified. Any operation
@@ -171,9 +171,9 @@ def _reroute_ts(ts0, ts1, mode, can_modify=None, cannot_modify=None):
   Returns:
     The number of individual modifications made by the function.
   Raises:
-    TypeError: if `ts0` or `ts1` cannot be converted to a list of `tf.Tensor`.
+    TypeError: if `ts0` or `ts1` cannot be converted to a list of `gde.Tensor`.
     TypeError: if `can_modify` or `cannot_modify` is not `None` and cannot be
-      converted to a list of `tf.Operation`.
+      converted to a list of `gde.Node`.
   """
   a2b, b2a = _RerouteMode.check(mode)
   ts0 = util.make_list_of_t(ts0)
@@ -211,8 +211,8 @@ def swap_ts(ts0, ts1, can_modify=None, cannot_modify=None):
       A0 A1     A0 A1
 
   Args:
-    ts0: an object convertible to a list of `tf.Tensor`.
-    ts1: an object convertible to a list of `tf.Tensor`.
+    ts0: an object convertible to a list of `gde.Tensor`.
+    ts1: an object convertible to a list of `gde.Tensor`.
     can_modify: iterable of operations which can be modified. Any operation
       outside within_ops will be left untouched by this function.
     cannot_modify: iterable of operations which cannot be modified.
@@ -221,9 +221,9 @@ def swap_ts(ts0, ts1, can_modify=None, cannot_modify=None):
   Returns:
     The number of individual modifications made by the function.
   Raises:
-    TypeError: if ts0 or ts1 cannot be converted to a list of tf.Tensor.
+    TypeError: if ts0 or ts1 cannot be converted to a list of `gde.Tensor`.
     TypeError: if can_modify or cannot_modify is not None and cannot be
-      converted to a list of tf.Operation.
+      converted to a list of `gde.Node`.
   """
   return _reroute_ts(ts0, ts1, _RerouteMode.swap, can_modify, cannot_modify)
 
@@ -238,8 +238,8 @@ def reroute_ts(ts0, ts1, can_modify=None, cannot_modify=None):
   The end of the tensors in ts1 are left dangling.
 
   Args:
-    ts0: an object convertible to a list of `tf.Tensor`.
-    ts1: an object convertible to a list of `tf.Tensor`.
+    ts0: an object convertible to a list of `gde.Tensor`.
+    ts1: an object convertible to a list of `gde.Tensor`.
     can_modify: iterable of operations which can be modified. Any operation
       outside within_ops will be left untouched by this function.
     cannot_modify: iterable of operations which cannot be modified. Any
@@ -247,9 +247,9 @@ def reroute_ts(ts0, ts1, can_modify=None, cannot_modify=None):
   Returns:
     The number of individual modifications made by the function.
   Raises:
-    TypeError: if ts0 or ts1 cannot be converted to a list of tf.Tensor.
+    TypeError: if ts0 or ts1 cannot be converted to a list of `gde.Tensor`.
     TypeError: if can_modify or cannot_modify is not None and cannot be
-      converted to a list of tf.Operation.
+      converted to a list of `gde.Node`.
   """
   return _reroute_ts(ts0, ts1, _RerouteMode.a2b, can_modify, cannot_modify)
 
@@ -453,13 +453,13 @@ def remove_control_inputs(op, cops):
   """Remove the control inputs cops from co.
 
   Warning: this function is directly manipulating the internals of the
-  `tf.Graph`.
+  `gde.Graph`.
 
   Args:
-    op: a `tf.Operation` from which to remove the control inputs.
-    cops: an object convertible to a list of `tf.Operation`.
+    op: a `gde.Node` from which to remove the control inputs.
+    cops: an object convertible to a list of `gde.Node`.
   Raises:
-    TypeError: if op is not a `tf.Operation`.
+    TypeError: if op is not a `gde.Node`.
     ValueError: if any cop in cops is not a control input of op.
   """
   if not isinstance(op, node.Node):
@@ -476,13 +476,13 @@ def remove_control_inputs(op, cops):
 def add_control_inputs(op, cops):
   """Add the control inputs cops to op.
 
-  Warning: this function is directly manipulating the internals of the tf.Graph.
+  Warning: this function is directly manipulating the internals of the `gde.Graph`.
 
   Args:
-    op: a tf.Operation to which the control inputs are added.
-    cops: an object convertible to a list of `tf.Operation`.
+    op: a `gde.Node` to which the control inputs are added.
+    cops: an object convertible to a list of `gde.Node`.
   Raises:
-    TypeError: if op is not a tf.Operation
+    TypeError: if op is not a `gde.Node`
     ValueError: if any cop in cops is already a control input of op.
   """
   if not isinstance(op, node.Node):

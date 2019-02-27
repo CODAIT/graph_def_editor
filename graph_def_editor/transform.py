@@ -220,7 +220,7 @@ class TransformerInfo(object):
       return self._transformed_ts
     else:
       raise TypeError(
-          "Expected a tf.Tensor or a tf.Operation, got a {}".format(
+          "Expected a gde.Tensor or a gde.Node, got a {}".format(
               type(top)))
 
   def _transformed_elem(self, original_top, missing_fn=None):
@@ -383,7 +383,7 @@ class Transformer(object):
     """Transformer constructor.
 
     The following members can be modified:
-    transform_op_handler: handle the transformation of a `tf.Operation`.
+    transform_op_handler: handle the transformation of a `gde.Node`.
       This handler defaults to a simple copy.
     assign_collections_handler: handle the assignment of collections.
       This handler defaults to assigning new collections created under the
@@ -439,7 +439,7 @@ class Transformer(object):
     """
     sgv = subgraph.make_view(sgv)
     if not isinstance(dst_graph, Graph):
-      raise TypeError("Expected a tf.Graph, got: {}".format(type(dst_graph)))
+      raise TypeError("Expected a gde.Graph, got: {}".format(type(dst_graph)))
 
     src_scope = util.scope_finalize(src_scope)
     dst_scope = util.scope_finalize(dst_scope)
@@ -641,7 +641,7 @@ def copy_with_input_replacements(sgv, replacement_ts,
       information about the transform, including mapping between
       original and transformed tensors and operations.
   Raises:
-    TypeError: if dst_graph is not a tf.Graph.
+    TypeError: if dst_graph is not a gde.Graph.
     StandardError: if sgv cannot be converted to a SubGraphView using
       the same rules as the function subgraph.make_view.
   """
