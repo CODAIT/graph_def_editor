@@ -228,11 +228,11 @@ def fold_batch_norms(g: graph.Graph):
 
     # Cut the Mul node out of the graph
     reroute.reroute_ts(mul_node.inputs[0], mul_node.outputs[0])
-    g.remove_node_by_name(mul_node.name)
+    g.remove_node_by_name(mul_node.name, False)
 
     # Const might still be in use; check before removing it.
     if len(mul_values_node.outputs[0].consumers()) == 0:
-      g.remove_node_by_name(mul_values_node.name)
+      g.remove_node_by_name(mul_values_node.name, False)
 
     # Original rewrite gave the name of the Mul node to the Conv2D. Recreate
     # that behavior here, including putting the node in the collections that
@@ -370,7 +370,7 @@ def _replace_batch_norm_with_bias_add(
   # Note that the batch norm node has a bunch of other outputs that aren't
   # used in inference.
   reroute.reroute_ts(bias_add_node.output(0), batch_norm_node.output(0))
-  g.remove_node_by_name(batch_norm_node.name)
+  g.remove_node_by_name(batch_norm_node.name, False)
 
   # Original rewrite gave the name of the batch norm node to the BiasAdd.
   # Recreate that behavior here, including putting the node in the
@@ -385,7 +385,7 @@ def _replace_batch_norm_with_bias_add(
   for ix in range(1, 5):
     in_tensor = orig_inputs[ix]
     if len(in_tensor.consumers()) == 0:
-      g.remove_node_by_name(in_tensor.node.name)
+      g.remove_node_by_name(in_tensor.node.name, False)
 
 
 def fold_old_batch_norms(g: graph.Graph):
@@ -617,11 +617,11 @@ def fold_batch_norms_up(g: graph.Graph):
 
     # Cut the Mul node out of the graph
     reroute.reroute_ts(mul_node.inputs[0], mul_node.outputs[0])
-    g.remove_node_by_name(mul_node.name)
+    g.remove_node_by_name(mul_node.name, False)
 
     # Const might still be in use; check before removing it.
     if len(mul_values_node.outputs[0].consumers()) == 0:
-      g.remove_node_by_name(mul_values_node.name)
+      g.remove_node_by_name(mul_values_node.name, False)
 
     if "relu" in match_info and match_info["relu"].op_type == "Relu6":
       handle_relu6(match_info["relu"], scale)

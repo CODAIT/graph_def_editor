@@ -55,13 +55,13 @@ def _check_ts_compatibility(ts0, ts1):
     # check dtype
     dtype0, dtype1 = t0.dtype, t1.dtype
     if not dtype0.is_compatible_with(dtype1):
-      raise ValueError("Dtypes {} and {} are not compatible.".format(dtype0,
-                                                                     dtype1))
+      raise ValueError("Dtypes {} and {} of tensors {} and {} are not "
+                       "compatible.".format(dtype0, dtype1, t0.name, t1.name))
     # check shape
     shape0, shape1 = t0.shape, t1.shape
     if not shape0.is_compatible_with(shape1):
-      raise ValueError("Shapes {} and {} are not compatible.".format(shape0,
-                                                                     shape1))
+      raise ValueError("Shapes {} and {} of tensors {} and {} are not "
+                       "compatible.".format(shape0, shape1, t0.name, t1.name))
 
 
 class _RerouteMode(object):

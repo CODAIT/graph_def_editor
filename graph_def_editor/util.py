@@ -22,7 +22,7 @@ from __future__ import print_function
 
 import collections
 import re
-from typing import Any
+from typing import Any, List
 
 import numpy as np
 from six import iteritems
@@ -263,7 +263,8 @@ def make_list_of_op(ops, check_graph=True, allow_graph=True, ignore_ts=False):
     return [op for op in ops if isinstance(op, node.Node)]
 
 
-def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False):
+def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False) \
+  -> List[tensor.Tensor]:
   """Convert ts to a list of `tf.Tensor`.
 
   Args:
