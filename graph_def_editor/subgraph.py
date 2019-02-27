@@ -177,16 +177,16 @@ class SubGraphView(object):
     """Create a subgraph containing the given ops and the "passthrough" tensors.
 
     Args:
-      inside_ops: an object convertible to a list of `tf.Operation`. This list
+      inside_ops: an object convertible to a list of `gde.Node`. This list
         defines all the operations in the subgraph.
-      passthrough_ts: an object convertible to a list of `tf.Tensor`. This list
+      passthrough_ts: an object convertible to a list of `gde.Tensor`. This list
         define all the "passthrough" tensors. A passthrough tensor is a tensor
         which goes directly from the input of the subgraph to it output, without
         any intermediate operations. All the non passthrough tensors are
         silently ignored.
     Raises:
-      TypeError: if inside_ops cannot be converted to a list of `tf.Operation`
-        or if `passthrough_ts` cannot be converted to a list of `tf.Tensor`.
+      TypeError: if inside_ops cannot be converted to a list of `gde.Node`
+        or if `passthrough_ts` cannot be converted to a list of `gde.Tensor`.
     """
 
     inside_ops = util.make_list_of_op(inside_ops)
@@ -370,10 +370,10 @@ class SubGraphView(object):
     affected.
 
     Args:
-      new_input_indices: an iterable of integers or tf.Tensors
+      new_input_indices: an iterable of integers or `gde.Tensor`s
         representing a mapping between the old inputs and the new ones.
         Integers must be positive and smaller than the number of old inputs.
-        tf.Tensors must belong to the old list of inputs.
+        `gde.Tensor`s must belong to the old list of inputs.
         This mapping can be under-complete and must be without repetitions.
     Returns:
       A new modified instance of the original subgraph view with remapped
@@ -393,10 +393,10 @@ class SubGraphView(object):
     affected.
 
     Args:
-      new_output_indices: an iterable of integers or tf.Tensors
+      new_output_indices: an iterable of integers or `gde.Tensor`s
         representing a mapping between the old outputs and the new ones.
         Integers must be positive and smaller than the number of old outputs.
-        tf.Tensors must belong to the old list of outputs.
+        `gde.Tensor`s must belong to the old list of outputs.
         This mapping can be under-complete and can have repetitions.
     Returns:
       A new modified instance of the original subgraph view with remapped
@@ -413,15 +413,15 @@ class SubGraphView(object):
     affected.
 
     Args:
-      new_input_indices: an iterable of integers or tf.Tensors
+      new_input_indices: an iterable of integers or `gde.Tensor`s
         representing a mapping between the old inputs and the new ones.
         Integers must be positive and smaller than the number of old inputs.
-        tf.Tensors must belong to the old list of inputs.
+        `gde.Tensor`s must belong to the old list of inputs.
         This mapping can be under-complete and must be without repetitions.
-      new_output_indices: an iterable of integers or tf.Tensors
+      new_output_indices: an iterable of integers or `gde.Tensor`s
         representing a mapping between the old outputs and the new ones.
         Integers must be positive and smaller than the number of old outputs.
-        tf.Tensors must belong to the old list of outputs.
+        `gde.Tensor`s must belong to the old list of outputs.
         This mapping can be under-complete and can have repetitions.
     Returns:
       A new modified instance of the original subgraph view with remapped
@@ -587,11 +587,11 @@ class SubGraphView(object):
   def consumers(self):
     """Return a Python set of all the consumers of this subgraph view.
 
-    A consumer of a subgraph view is a tf.Operation which is a consumer
+    A consumer of a subgraph view is a `gde.Node` which is a consumer
     of one of the output tensors and is not in the subgraph.
 
     Returns:
-      A list of `tf.Operation` which are the consumers of this subgraph view.
+      A list of `gde.Node` which are the consumers of this subgraph view.
     """
     ops_set = frozenset(self._ops)
     res = []
@@ -631,7 +631,7 @@ def make_view(*args, **kwargs):
 
   Args:
     *args: list of 1) regular expressions (compiled or not) or 2) (array of)
-      `tf.Operation` 3) (array of) `tf.Tensor`. Those objects will be converted
+      `gde.Node` 3) (array of) `gde.Tensor`. Those objects will be converted
       into a list of operations and a list of candidate for passthrough tensors.
     **kwargs: keyword graph is used 1) to check that the ops and ts are from
       the correct graph 2) for regular expression query
@@ -640,7 +640,7 @@ def make_view(*args, **kwargs):
   Raises:
     TypeError: if the optional keyword argument graph is not a `gde.Graph`
       or if an argument in args is not an (array of) `gde.Tensor`
-      or an (array of) `tf.Operation` or a string or a regular expression.
+      or an (array of) `gde.Node` or a string or a regular expression.
     ValueError: if one of the keyword arguments is unexpected.
   """
   # get keywords arguments
