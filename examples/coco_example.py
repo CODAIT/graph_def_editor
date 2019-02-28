@@ -1,4 +1,4 @@
-# Coypright 2018 IBM. All Rights Reserved.
+# Coypright 2019 IBM. All Rights Reserved.
 # Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,7 +25,12 @@ blob/master/research/object_detection/g3doc/detection_model_zoo.md.
 Specifically, we use the object detector trained on the COCO dataset with a
 MobileNetV1 architecture.
 
-The basic model
+The original model takes as input batches of equal-sized images, represented
+as a single dense numpy array of binary pixel data.  The output of the
+original model represents the object type as an integer. This script grafts on
+pre- and post-processing ops to make the input and output format more amenable
+to use in applications. After these ops are added, the resulting graph takes a
+single image file as an input and produces string-valued object labels
 
 To run this example from the root of the project, type:
    PYTHONPATH=$PWD env/bin/python examples/coco_example.py
