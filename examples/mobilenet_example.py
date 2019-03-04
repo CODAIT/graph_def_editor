@@ -230,7 +230,7 @@ def main(_):
 
   # Run model before and after rewrite and compare results
   if not os.path.exists(_PANDA_PIC_FILE):
-    print("Downloading {} to {}", _PANDA_PIC_URL, _PANDA_PIC_FILE)
+    print("Downloading {} to {}".format(_PANDA_PIC_URL, _PANDA_PIC_FILE))
     urllib.request.urlretrieve(_PANDA_PIC_URL, _PANDA_PIC_FILE)
   img = np.array(PIL.Image.open(_PANDA_PIC_FILE).resize((224, 224))).astype(
     np.float) / 128 - 1

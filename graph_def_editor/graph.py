@@ -370,7 +370,7 @@ class Graph(object):
     # Don't need to increment version counter; add_node() already did that.
     return ret
 
-  def remove_node_by_name(self, name: str):
+  def remove_node_by_name(self, name: str, check_for_refs: bool = True):
     """
     Removes the indicated node from this graph and from any collections in
     this graph.
@@ -380,8 +380,19 @@ class Graph(object):
 
     Args:
       name: name of the node to remove
+      check_for_refs: Optional. If True, raise an exception if there are any
+        other nodes in the graph that reference this node. If False, allow
+        removal of nodes with outstanding references to them. In the latter
+        case, the caller is responsible for cleaning up the graph afterwards.
     """
     n = self.get_node_by_name(name)
+    if check_for_refs:
+      for t in n.outputs:
+        if len(t.consumers()) > 0:
+          raise ValueError("Removing node '{}' would leave dangling "
+                           "references from nodes {} to tensor '{}'"
+                           "".format(name, [c.name for c in t.consumers()],
+                                     t.name))
     # noinspection PyProtectedMember
     n._remove_from_graph()
     del self._node_name_to_node[name]

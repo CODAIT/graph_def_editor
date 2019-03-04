@@ -24,7 +24,7 @@ import re
 from six import iteritems
 from six import string_types
 import textwrap
-from typing import Any, Dict, List, Iterable, Union
+from typing import Any, Dict, List, Iterable, Tuple, Union
 
 from graph_def_editor import util
 from graph_def_editor.graph import Graph
@@ -37,6 +37,7 @@ __all__ = [
   "filter_ts",
   "filter_ts_from_regex",
   "filter_ops",
+  "filter_ops_by_optype",
   "filter_ops_from_regex",
   "get_name_scope_ops",
   "check_cios",
@@ -172,6 +173,21 @@ def filter_ops(ops, positive_filter):
   if positive_filter is not True:  # pylint: disable=g-explicit-bool-comparison
     ops = [op for op in ops if positive_filter(op)]
   return ops
+
+
+def filter_ops_by_optype(ops, op_types: Union[str, List[str], Tuple[str]]):
+  """
+  Filter out all ops that do not have op types in a provided list of types.
+
+  Args:
+    ops: an object convertible to a list of `gde.Node`.
+    op_types: Either a single op type string or a list/tuple of them
+
+  Returns a list of the `gde.Node`s that have one of the indicated optypes
+  """
+  if isinstance(op_types, str):
+    op_types = [op_types]
+  return filter_ops(ops, lambda n: n.op_type in op_types)
 
 
 def filter_ops_from_regex(ops, regex):
