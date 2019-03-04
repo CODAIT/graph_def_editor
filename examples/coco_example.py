@@ -30,7 +30,7 @@ as a single dense numpy array of binary pixel data.  The output of the
 original model represents the object type as an integer. This script grafts on
 pre- and post-processing ops to make the input and output format more amenable
 to use in applications. After these ops are added, the resulting graph takes a
-single image file as an input and produces string-valued object labels
+single image file as an input and produces string-valued object labels.
 
 To run this example from the root of the project, type:
    PYTHONPATH=$PWD env/bin/python examples/coco_example.py
@@ -203,8 +203,8 @@ def _build_postprocessing_graph_def():
     raw_data = f.read()
   # Parse directly instead of going through the protobuf API dance.
   records = raw_data.split("}")
-  records = records[0:-1]  # Remove empty record at end
-  records = [r.replace("\n", "") for r in records] # Strip newlines
+  records.pop(-1)  # Remove empty record at end
+  records = [r.replace("\n", "") for r in records]  # Strip newlines
   regex = re.compile(r"item {  name: \".+\"  id: (.+)  display_name: \"(.+)\"")
   keys = []
   values = []
@@ -218,7 +218,7 @@ def _build_postprocessing_graph_def():
     # The original graph produces floating-point output for detection class,
     # even though the output is always an integer.
     float_class = tf.placeholder(tf.float32, shape=[None],
-                               name="detection_classes")
+                                 name="detection_classes")
     int_class = tf.cast(float_class, tf.int32)
     key_tensor = tf.constant(keys, dtype=tf.int32)
     value_tensor = tf.constant(values)
@@ -315,12 +315,10 @@ def _graph_has_op(g: tf.Graph, op_name: str):
   indicated graph has an op by the indicated name.
   """
   all_ops_in_graph = g.get_operations()
-  names_of_all_ops_in_graph = [o.name for o in all_ops_in_graph]
-  return op_name in names_of_all_ops_in_graph
+  return any(op_name == o.name for o in all_ops_in_graph)
 
 
-def _run_coco_graph(graph_proto: tf.GraphDef, img: np.ndarray,
-                    filter_results: bool = True):
+def _run_coco_graph(graph_proto: tf.GraphDef, img: np.ndarray):
   """
   Run an example image through a TensorFlow graph and print a summary of
   the results to STDOUT.
@@ -329,7 +327,6 @@ def _run_coco_graph(graph_proto: tf.GraphDef, img: np.ndarray,
 
   graph_proto: GraphDef protocol buffer message holding serialized graph
   img: input image, either as a numpy array or a JPEG binary string
-  filter_results: True to filter out results below a score of 0.9
   """
   image_tensor_name = _INPUT_NODE_NAMES[0] + ":0"
   output_tensor_names = [n + ":0" for n in _OUTPUT_NODE_NAMES]
