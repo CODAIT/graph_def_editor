@@ -595,7 +595,7 @@ class Node(object):
     """
     Remove any attributes that are attached to this node.
     """
-    self._attributes.clear()
+    self._attributes = []
 
   def _attr_names(self):
     # type: () -> List[str]
@@ -734,7 +734,7 @@ class Node(object):
     """
     Remove this node from amy collections that it is currently a member of.
     """
-    self._collection_names.clear()
+    self._collection_names = set()
 
 
 ################################################################################
