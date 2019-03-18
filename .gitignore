@@ -3,6 +3,7 @@
 env
 *.swp
 */__pycache__
+*.pyc
 *.iml
 test.out
 example.out
