@@ -191,7 +191,7 @@ def filter_ops_by_optype(
 
   Returns a list of the `gde.Node`s that have one of the indicated optypes
   """
-  if isinstance(op_types, str):
+  if isinstance(op_types, string_types):
     op_types = [op_types]
   return filter_ops(ops, lambda n: n.op_type in op_types)
 

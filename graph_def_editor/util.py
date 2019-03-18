@@ -27,7 +27,7 @@ if sys.version >= '3':
   from typing import Any, List
 
 import numpy as np
-from six import iteritems
+from six import iteritems, string_types
 import tensorflow as tf
 
 from graph_def_editor import graph, node, tensor
@@ -579,7 +579,7 @@ def _python_type_to_attr_list_elem(
       proto. Modified in place.
     elem: Original value to convert.
   """
-  if isinstance(elem, str):
+  if isinstance(elem, string_types):
     list_value.s.append(tf.compat.as_bytes(elem))
   # Must check for bool before int because bool is a subclass of int in Python
   elif isinstance(elem, bool):
@@ -628,7 +628,7 @@ def python_type_to_attr_value(value #type: Any
     # TODO(frreiss): Should this case result in an error?
     return value
   # Scalar types, in the order they appear in the .proto file
-  elif isinstance(value, str):
+  elif isinstance(value, string_types):
     return tf.AttrValue(s=tf.compat.as_bytes(value))
   # Must check for bool before int because bool is a subclass of int in Python
   elif isinstance(value, bool):

@@ -21,6 +21,7 @@ from __future__ import print_function
 import datetime
 from distutils import dir_util
 import os
+from six import string_types
 import tensorflow as tf
 import sys
 if sys.version >= '3':
@@ -283,7 +284,7 @@ class Graph(object):
     Returns the named item as a `gde.Node` or `gde.Tensor` object. If there
     is a conflict between node and tensor names, node names win.
     """
-    if not isinstance(name, str):
+    if not isinstance(name, string_types):
       raise TypeError("name must be a string; got type {}".format(type(name)))
 
     if self.contains_node(name):
@@ -314,7 +315,7 @@ class Graph(object):
     Returns true if the graph has a node by the indicated name. Exact string
     match.
     """
-    if not isinstance(name, str):
+    if not isinstance(name, string_types):
       raise ValueError("Node name argument is not a string, but is of type "
                        "{}".format(type(name)))
     return name in self._node_name_to_node.keys()
