@@ -19,14 +19,13 @@ from tensorflow.core.framework import variable_pb2
 
 import sys
 if sys.version >= '3':
+  from graph_def_editor import graph
   from typing import AbstractSet, Union
 
 
 __all__ = [
   "Variable",
 ]
-
-from graph_def_editor import graph
 
 
 class Variable(object):
