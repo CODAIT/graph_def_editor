@@ -47,8 +47,13 @@ class Node(object):
   Accumulates the parameters of the node and can produce an appropriate
   tf.NodeDef protobuf on demand.
   """
-  def __init__(self, g: 'graph.Graph', node_id: int, name: str, op_name: str,
-               device: str = ""):
+  def __init__(self,
+               g, # type: graph.Graph
+               node_id, # type: int
+               name, # type: int
+               op_name, # type: str
+               device = "" # type: str
+               ):
     """
     This constructor should only be called from methods of the Graph
     class.
@@ -75,17 +80,20 @@ class Node(object):
     self._collection_names = set()  # Set[str]
 
   def __repr__(self):
+    # type: () -> str
     return "Node[{}|{}]".format(self.name, self.op_type)
 
   @property
-  def name(self) -> str:
+  def name(self):
+    # type: () -> str
     """
     Returns:
        Unique name of the node that this Node represents
     """
     return self._name
 
-  def _change_name(self, new_name: str):
+  def _change_name(self, new_name):
+    # type: (str) -> None
     """
     THIS METHOD SHOULD ONLY BE CALLED BY THE PARENT GRAPH
 
@@ -97,14 +105,16 @@ class Node(object):
     self._name = new_name
 
   @property
-  def op_type(self) -> str:
+  def op_type(self):
+    # type: () -> str
     """
     Returns:
       Name of the TensorFlow op type that this Node represents
     """
     return self._op_name
 
-  def change_op_type(self, new_op_type: str):
+  def change_op_type(self, new_op_type):
+    # type: (str) -> None
     """
     Change the op type of this node. Does NOT rerun shape or type inference.
 
@@ -116,7 +126,8 @@ class Node(object):
     self._op_name = new_op_type
 
   @property
-  def graph(self) -> 'graph.Graph':
+  def graph(self):
+    # type: () -> graph.Graph
     """
     Returns:
       `gde.Graph` object representing the graph in which this Node resides.
@@ -124,7 +135,8 @@ class Node(object):
     return self._graph
 
   @property
-  def id_in_graph(self) -> int:
+  def id_in_graph(self):
+    # type: () -> int
     """
     Returns this node's unique integer id within the parent graph. Useful for
     sorting nodes in an arbitrary but consistent order.
@@ -132,6 +144,7 @@ class Node(object):
     return self._id
 
   def _remove_from_graph(self):
+    # type: () -> None
     """
     THIS METHOD TO BE CALLED ONLY BY THE PARENT GRAPH.
 
@@ -143,7 +156,8 @@ class Node(object):
     # to the graph, only to the node
 
   @property
-  def outputs(self) -> Tuple[tensor.Tensor]:
+  def outputs(self):
+    # type: () -> Tuple[tensor.Tensor]
     """
     Returns:
       Tuple (i.e. immutable list) of `gde.Tensor` objects representing the
@@ -154,7 +168,8 @@ class Node(object):
       raise ValueError("Outputs of {} have not been set".format(self))
     return tuple(self._outputs)
 
-  def output(self, index: int) -> tensor.Tensor:
+  def output(self, index):
+    # type: (int) -> tensor.Tensor
     """
     Args:
       index: Index of an output of the node
@@ -166,7 +181,8 @@ class Node(object):
     return self._outputs[index]
 
   @property
-  def inputs(self) -> Tuple[tensor.Tensor]:
+  def inputs(self):
+    # type: () -> Tuple[tensor.Tensor]
     """
     Returns:
       Tuple (i.e. immutable list) of `gde.Tensor` objects representing the
@@ -175,7 +191,8 @@ class Node(object):
     """
     return tuple(self._inputs)
 
-  def replace_input(self, index: int, new_input: tensor.Tensor):
+  def replace_input(self, index, new_input):
+    # type: (int, tensor.Tensor) -> None
     """
     Replace an existing input of this node with the specified tensor. Roughly
     equivalent to `tf.Operator._update_input()`.
@@ -198,7 +215,8 @@ class Node(object):
     self._inputs[index] = new_input
     self._graph.increment_version_counter()
 
-  def set_inputs(self, new_inputs: Iterable[tensor.Tensor]):
+  def set_inputs(self, new_inputs):
+    # type: (Iterable[tensor.Tensor]) -> None
     """
     Set all inputs at once, removing anything that was there previously.
 
@@ -213,7 +231,8 @@ class Node(object):
     self._graph.increment_version_counter()  # New edges added to graph
 
   @property
-  def control_inputs(self) -> Tuple['Node']:
+  def control_inputs(self):
+    # type: () -> Tuple[Node]
     """
     Returns:
       Tuple (i.e. immutable list) of `gde.Node` objects representing the
@@ -222,7 +241,8 @@ class Node(object):
     return tuple(self._control_inputs)
 
   @property
-  def device(self) -> str:
+  def device(self):
+    # type: () -> str
     """
     Returns:
       TensorFlow device placement string describing where this node should be
@@ -231,11 +251,13 @@ class Node(object):
     return self._device
 
   @device.setter
-  def device(self, value: str):
+  def device(self, value):
+    # type: (str) -> None
     self._device = value
 
   @property
-  def colocation_groups(self) -> List[str]:
+  def colocation_groups(self):
+    # type: () -> List[str]
     """
     **A word about colocation groups:**
 
@@ -321,7 +343,8 @@ class Node(object):
     return tuple(self._colocation_groups)
 
   @colocation_groups.setter
-  def colocation_groups(self, value: Iterable[str]):
+  def colocation_groups(self):
+    # type: (Iterable[str]) -> None
     """
     Setter for the `colocation_groups` property.
 
@@ -339,7 +362,8 @@ class Node(object):
     # generated about colocation constraints.
     self.graph.increment_version_counter()
 
-  def add_colocation_group(self, head_node_name: str, validate: bool = True):
+  def add_colocation_group(self, head_node_name, validate = True):
+    # type: (str, bool) -> None
     """
     Add a new colocation group to this Node.
 
@@ -365,7 +389,8 @@ class Node(object):
         head_node_name))
     self._colocation_groups.append(head_node_name)
 
-  def to_node_def(self, target: tf.NodeDef = None, add_shapes: bool = True):
+  def to_node_def(self, target = None, add_shapes = True):
+    # type: (tf.NodeDef, bool) -> tf.NodeDef
     """
     Args:
       target: optional preallocated, empty NodeDef object to fill in. If not
@@ -405,7 +430,8 @@ class Node(object):
       )
     return target
 
-  def get_attr(self, key: str) -> Any:
+  def get_attr(self, key):
+    # type: (str) -> Any
     """
     Retrieve the value of an attribute by name.
 
@@ -434,7 +460,8 @@ class Node(object):
     else:
       return ret
 
-  def has_attr(self, key: str) -> bool:
+  def has_attr(self, key):
+    # type: (str) -> bool
     """
     Args:
       key: String name of a potential attribute
@@ -443,7 +470,8 @@ class Node(object):
     """
     return key in self._attributes
 
-  def get_attr_keys(self) -> Tuple[str]:
+  def get_attr_keys(self):
+    # type: () -> Tuple[str]
     """
     Returns:
       Tuple (immutable list) of the keys of all attributes currently present
@@ -451,8 +479,12 @@ class Node(object):
     """
     return tuple([p[0] for p in self._attributes])
 
-  def add_attr(self, key: str, value: Any,
-               validate_colocation_groups: bool = False):
+  def add_attr(self,
+               key, # type: str
+               value, # type: Any
+               validate_colocation_groups = False # type: bool
+               ):
+    # type: (...) -> None
     """Add a single attribute to the underlying NodeDef's attr list.
 
     If you use this method to set the special "_class" attribute,
@@ -491,7 +523,8 @@ class Node(object):
       # Make sure attributes appear in protobuf in the order added
       self._attributes.append((key, value))
 
-  def _update_shapes(self, new_shapes: List[tf.TensorShape]):
+  def _update_shapes(self, new_shapes):
+    # type: (List[tf.TensorShape]) -> None
     """
     Put a set of output shapes in place without changing dtypes. Raises an
     error if doing so would change the number of outputs. Sets dtypes to None
@@ -511,8 +544,12 @@ class Node(object):
       for i in range(len(new_shapes)):
         self._outputs[i].shape = new_shapes[i]
 
-  def replace_attr(self, key: str, value: Any,
-                   validate_colocation_groups: bool = False):
+  def replace_attr(self,
+                   key, # type: str
+                   value, # type: Any
+                   validate_colocation_groups = False # type: bool
+                   ):
+    # type: (...) -> None
     """
     Replace an existing attribute in the underlying NodeDef's attr list,
     without changing the order of the list.
@@ -552,15 +589,18 @@ class Node(object):
           break
 
   def clear_attrs(self):
+    # type: () -> None
     """
     Remove any attributes that are attached to this node.
     """
     self._attributes.clear()
 
   def _attr_names(self):
+    # type: () -> List[str]
     return [a[0] for a in self._attributes]
 
-  def set_control_inputs(self, new_control_inputs: Iterable['Node']):
+  def set_control_inputs(self, new_control_inputs):
+    # type: (Iterable[Node]) -> None
     """
     Set all control inputs at once, removing anything that was there
     previously.
@@ -570,9 +610,8 @@ class Node(object):
     """
     self._control_inputs = list(new_control_inputs)
 
-  def set_outputs_from_pairs(self,
-                             new_outputs: List[Tuple[tf.DType,
-                                                     tf.TensorShape]]):
+  def set_outputs_from_pairs(self, new_outputs):
+    # type: (List[Tuple[tf.DType, tf.TensorShape]) -> None
     """
     Set all outputs at once, removing anything that was there previously.
 
@@ -604,6 +643,7 @@ class Node(object):
     self._graph.increment_version_counter()  # Just in case
 
   def infer_outputs(self):
+    # type: () -> None
     """
     Use TensorFlow's shape and dtype inference to determine the number of
     outputs as well as their shapes and dtypes, based on the node's op type
@@ -647,8 +687,8 @@ class Node(object):
 
         # TODO(frreiss): If this op has a "T" attribute, set that too.
 
-  def set_inputs_from_strings(self, new_inputs: Iterable[str],
-                              set_control_inputs: bool = True):
+  def set_inputs_from_strings(self, new_inputs, set_control_inputs = True):
+    # type: (Iterable[str], bool) -> None
     """
     Set all input at once, converting TensorFlow string-format inputs into
     `Tensor` objects. All nodes referenced in the input strings must be
@@ -668,14 +708,16 @@ class Node(object):
     self._graph.increment_version_counter()  # New edges added to graph
 
   @property
-  def collection_names(self) -> AbstractSet[str]:
+  def collection_names(self):
+    # type: () -> AbstractSet[str]
     """
     Returns the names of all collections this node is a member of in the
     parent graph.
     """
     return frozenset(self._collection_names)
 
-  def add_to_collection(self, collection_name: str):
+  def add_to_collection(self, collection_name):
+    # type: (str) -> None
     """
     Add the node to the indicated collection.
     """
@@ -686,6 +728,7 @@ class Node(object):
       self._graph.increment_version_counter()
 
   def remove_from_collections(self):
+    # type: () -> None
     """
     Remove this node from amy collections that it is currently a member of.
     """
@@ -696,7 +739,8 @@ class Node(object):
 # Stuff below this line is private to this file.
 
 
-def _canonicalize_output_name(name: str):
+def _canonicalize_output_name(name):
+  # type: (str) -> str
   """
   Args:
     name: Name for an op output as it would appear in the protocol buffer
@@ -710,8 +754,10 @@ def _canonicalize_output_name(name: str):
     return name + ":0"
 
 
-def _decode_inputs(inputs: Iterable[str], g: 'graph.Graph') -> List[
-  tensor.Tensor]:
+def _decode_inputs(inputs, # type: Iterable[str]
+                   g # type: graph.Graph
+  ):
+  # type: (...) -> List[tensor.Tensor]
   """
   Extract and decode the inputs in a list of TensorFlow input specification
   strings.
@@ -744,8 +790,10 @@ def _decode_inputs(inputs: Iterable[str], g: 'graph.Graph') -> List[
   return input_tensors
 
 
-def _decode_control_inputs(inputs: Iterable[str], g: 'graph.Graph') -> List[
-  Node]:
+def _decode_control_inputs(inputs, # type: Iterable[str]
+                           g # type: graph.Graph
+                           ):
+  # type: (...) -> List[Node]
   """
   Extract and decode the control inputs in a list of TensorFlow input
   specification strings.
@@ -797,7 +845,8 @@ def _validate_colocation_group_attr(value: Any) -> List[str]:
   return ret
 
 
-def _validate_output_shapes_attr(value: Any) -> List[tf.TensorShape]:
+def _validate_output_shapes_attr(value):
+  # type: (Any) -> List[tf.TensorShape]
   """
   Validate a potential value for the special "_output_shapes" attribute.
 

@@ -48,7 +48,8 @@ class GraphVisitor(object):
   """
   Visitor callback for various graph traversals
   """
-  def visit_node(self, n: 'node.Node'):
+  def visit_node(self, n):
+    # type: (node.Node) -> None
     raise NotImplementedError()
 
 
@@ -57,7 +58,8 @@ class SaverInfo(object):
   Object to encapsulate information about a `tf.train.Saver` object that can
   reconstitute the variable values for this graph.
   """
-  def __init__(self, path: str, saver_def: tf.train.SaverDef):
+  def __init__(self, path, saver_def):
+    # type: (str, tf.train.SaverDef) -> None
     """
     Args:
       path: Path to the location of serialized variable information on disk
@@ -73,11 +75,10 @@ class SignatureInfo(object):
   AKA signatures.
   """
   def __init__(self):
-    self._signature_defs = {}  # Dict[str, meta_graph_pb2.SignatureDef]
+    self._signature_defs = {}  # type: Dict[str, meta_graph_pb2.SignatureDef]
 
-  def add_signature_def(self,
-                        name: str,
-                        signature_def: meta_graph_pb2.SignatureDef):
+  def add_signature_def(self, name, signature_def):
+    # type: (str, meta_graph_pb2.SignatureDef) -> None
     """
     Add a signature to the set of entry points.
 
@@ -92,6 +93,7 @@ class SignatureInfo(object):
 
   @property
   def signature_defs(self):
+    # type: () -> Dict[str, Any]
     return self._signature_defs
 
 
@@ -108,11 +110,14 @@ class Graph(object):
                   collections
   """
 
-  def __init__(self, g: Union[tf.Graph, tf.GraphDef] = None,
-               name: str = None,
-               collections: Dict[str, meta_graph_pb2.CollectionDef] = None,
-               saver_info: SaverInfo = None,
-               signature_info: SignatureInfo = None):
+  def __init__(
+          self,
+          g = None, # type: Union[tf.Graph, tf.GraphDef]
+          name = None, # type: str
+          collections = None, # type: Dict[str, meta_graph_pb2.CollectionDef]
+          saver_info = None, # type: SaverInfo
+          signature_info = None # type: SignatureInfo
+          ):
     """
     Wrap a tf.GraphDef protocol buffer in a Graph object.
 
@@ -199,8 +204,8 @@ class Graph(object):
   def has_passthrough_saver(self):
     return self._passthrough_saver is not None
 
-  def add_node_from_node_def(self, node_def: tf.NodeDef,
-                             set_inputs: bool = False) -> 'node.Node':
+  def add_node_from_node_def(self, node_def, set_inputs = False):
+    # type: (tf.NodeDef, bool) -> node.Node
     """
     Unpack a `tf.NodeDef` protobuf into a mutable `Node` object.'
 
@@ -224,9 +229,10 @@ class Graph(object):
 
   def add_collection_from_collection_def(
           self,
-          collection_name: str,
-          collection_def: meta_graph_pb2.CollectionDef,
-          validate_name: bool = True):
+          collection_name,
+          collection_def,
+          validate_name = True):
+    # type: (str, meta_graph_pb2.CollectionDef, bool) -> None
     """
     Unpack a `tf.MetaGraphDef.CollectionDefEntry` of serialized variables 
     into a collection of variables in this graph. The collection must not exist. 
@@ -264,7 +270,8 @@ class Graph(object):
     else:
       raise ValueError("Unknown collection with name: {}".format(collection_name))
 
-  def __getitem__(self, name: str) -> Union[tensor.Tensor, 'node.Node']:
+  def __getitem__(self, name) :
+    # type: (str) -> Union[tensor.Tensor, 'node.Node']
     """
     Convenience method to retrieve a node or tensor of the graph by name
 
@@ -284,7 +291,8 @@ class Graph(object):
     else:
       raise ValueError("No node or tensor '{}' found in graph".format(name))
 
-  def get_node_by_name(self, name: str) -> 'node.Node':
+  def get_node_by_name(self, name):
+    # type: (str) -> node.Node
     """
     Retrieve a node in the graph by name.
 
@@ -298,7 +306,8 @@ class Graph(object):
     else:
       raise ValueError("No node '{}' found in graph".format(name))
 
-  def contains_node(self, name: str) -> bool:
+  def contains_node(self, name):
+    # type: (str) -> bool
     """
     Returns true if the graph has a node by the indicated name. Exact string
     match.
@@ -308,8 +317,12 @@ class Graph(object):
                        "{}".format(type(name)))
     return name in self._node_name_to_node.keys()
 
-  def add_node(self, name: str, op_name: str, uniquify_name: bool = False) -> \
-          'node.Node':
+  def add_node(self,
+               name, # type: str
+               op_name, # type: str
+               uniquify_name = False # type: bool
+               ):
+    # type: (...) -> node.Node
     """
     Add a new, empty node to the graph.
     Args:
@@ -336,9 +349,12 @@ class Graph(object):
     self.increment_version_counter()
     return ret
 
-  def add_node_from_node_def(self, node_def: tf.NodeDef,
-                             set_inputs: bool = False,
-                             set_control_inputs: bool = False) -> 'node.Node':
+  def add_node_from_node_def(self,
+                             node_def, # type: tf.NodeDef
+                             set_inputs = False, # type: bool
+                             set_control_inputs = False # type: bool
+                             ):
+    # type: (...) -> node.Node
     """
     Adds a new node to the graph, populating fields of the node from a
     `tf.NodeDef` protocol buffer.
@@ -370,7 +386,8 @@ class Graph(object):
     # Don't need to increment version counter; add_node() already did that.
     return ret
 
-  def remove_node_by_name(self, name: str, check_for_refs: bool = True):
+  def remove_node_by_name(self, name, check_for_refs = True):
+    # type: (str, str) -> None
     """
     Removes the indicated node from this graph and from any collections in
     this graph.
@@ -403,6 +420,7 @@ class Graph(object):
     # calculated dynamically by iterating over nodes.
 
   def rename_node(self, old_name, new_name):
+    # type: (str, str) -> None
     """
     Change the name of a node in the graph.
 
@@ -420,7 +438,8 @@ class Graph(object):
     self._node_name_to_node[new_name] = n
     self.increment_version_counter()
 
-  def add_variable(self, name: str) -> variable.Variable:
+  def add_variable(self, name):
+    # type: (str) -> variable.Variable
     """
     Adds a new variable to the graph.
 
@@ -437,7 +456,8 @@ class Graph(object):
     return v
 
   def add_variable_from_variable_def(self, variable_def,
-                                     skip_if_present: bool = False):
+                                     skip_if_present = False):
+    # type: (Any, bool) -> None
     """
     Adds a new variable to the graph and populates the fields of the
     corresponding Variable object according to a protocol buffer message.
@@ -460,7 +480,8 @@ class Graph(object):
   def variable_names(self):
     return self._variable_name_to_variable.keys()
 
-  def get_variable_by_name(self, name: str) -> variable.Variable:
+  def get_variable_by_name(self, name):
+    # type: (str) -> variable.Variable
     """
     Fetch a variable by its variable name.
 
@@ -472,7 +493,8 @@ class Graph(object):
     """
     return self._variable_name_to_variable[name]
 
-  def _name_in_use(self, name: str) -> bool:
+  def _name_in_use(self, name):
+    # type: (str) -> bool
     """Check whether a name is in use, using the same collision semantics as
     TensorFlow: Exact lowercase string match.
 
@@ -483,7 +505,8 @@ class Graph(object):
     """
     return name.lower() in [k.lower() for k in self._node_name_to_node.keys()]
 
-  def unique_name(self, name: str):
+  def unique_name(self, name):
+    # type: (str) -> str
     """Emulate the behavior of the method by the same name in `tf.Graph`.
 
     Does *not* emulate the `name_stack` field of `tf.Graph`.
@@ -516,11 +539,13 @@ class Graph(object):
     return new_name
 
   @property
-  def node_names(self) -> Iterable['node.Node']:
+  def node_names(self):
+    # type: () -> Iterable[node.Node]
     return self._node_name_to_node.keys()
 
   @property
-  def nodes(self) -> Tuple['node.Node']:
+  def nodes(self):
+    # type: () -> Tuple[node.Node]
     """
     Returns:
       A list of all nodes, both immutable and mutable, present in the graph
@@ -530,6 +555,7 @@ class Graph(object):
 
   @property
   def tensors(self):
+    # type: () -> List[tensor.Tensor]
     """
     Return a list of all the tensors which are input or output of an op in
     the graph.
@@ -539,7 +565,8 @@ class Graph(object):
       ts += op.outputs
     return ts
 
-  def contains_tensor(self, tensor_name: str) -> bool:
+  def contains_tensor(self, tensor_name):
+    # type: (str) -> bool
     """
     Returns true if the graph has a tensor by the indicated name. Exact string
     match.
@@ -561,7 +588,8 @@ class Graph(object):
       else:
         return True
 
-  def get_tensor_by_name(self, tensor_name: str, error_msg: str = None):
+  def get_tensor_by_name(self, tensor_name, error_msg = None):
+    # type: (str, str) -> tensor.Tensor
     """
     Retrieve a tensor by human-readable name.
 
@@ -592,7 +620,8 @@ class Graph(object):
       ))
     return n.output(output_ix)
 
-  def to_graph_def(self, add_shapes: bool = True):
+  def to_graph_def(self, add_shapes = True):
+    # type: (bool) -> tf.GraphDef
     """
     Args:
       add_shapes: If True, add the special "_output_shapes" attribute with
@@ -608,6 +637,7 @@ class Graph(object):
     return ret
 
   def to_tf_graph(self):
+    # type: () -> tf.Graph
     """
     Converts this graph into a new TensorFlow `Graph`. Also takes care of
     variables.
@@ -621,9 +651,8 @@ class Graph(object):
       util.load_variables_to_tf_graph(self)
     return ret
 
-  def to_saved_model(self, saved_model_path: str,
-                     tags: Iterable[str] = None) -> \
-          saved_model_pb2.SavedModel:
+  def to_saved_model(self, saved_model_path, tags = None):
+    # type: (str, Iterable[str]) -> saved_model_pb2.SavedModel
     """
     Writes this graph out as a TensorFlow SavedModel on disk.
 
@@ -760,6 +789,7 @@ class Graph(object):
 
   @property
   def version(self):
+    # type: () -> int
     """
     Returns a counter that goes up every time this graph is changed.
     """
@@ -767,6 +797,7 @@ class Graph(object):
 
   @property
   def frozen(self):
+    # type: () -> bool
     """
     True if the graph is configured to raise an exception on any structural
     modification.
@@ -775,6 +806,7 @@ class Graph(object):
 
   @frozen.setter
   def frozen(self, value):
+    # type: (bool) -> None
     self._frozen = value
 
   def increment_version_counter(self):
@@ -790,7 +822,8 @@ class Graph(object):
     self._head_name_to_coloc_group = None
     self._collection_name_to_type = None
 
-  def get_collection_by_name(self, name: str) -> Iterable[Any]:
+  def get_collection_by_name(self, name):
+    # type: (str) -> Iterable[Any]
     """Fetch the contents of a collection, similarly to the method in
     `tf.Graph` by the same name.
 
@@ -828,6 +861,7 @@ class Graph(object):
       raise ValueError("Unknown collection type '{}'".format(coll_type))
 
   def _build_collection_name_to_type(self):
+    # type: () -> None
     self._collection_name_to_type = {}
     passthrough_collection_names = set(self._passthrough_collections.keys())
     variable_collection_names = set()
@@ -863,18 +897,21 @@ class Graph(object):
     _add(node_collection_names, "node")
 
   def get_all_collection_keys(self):
+    # type: () -> Iterable[str]
     """Returns the keys associated with all collections stored in this object"""
     if self._collection_name_to_type is None:
       self._build_collection_name_to_type()
     return self._collection_name_to_type.keys()
 
-  def _get_next_id(self) -> int:
+  def _get_next_id(self):
+    # type: () -> int
     """Generates and returns a unique integer ID *within this graph*."""
     ret = self._next_id
     self._next_id = ret + 1
     return ret
 
-  def node_to_frame_names(self, n: 'node.Node') -> Tuple[str]:
+  def node_to_frame_names(self, n):
+    # type: (node.Node) -> Tuple[str]
     """
     Generates (or uses a cached copy of) a map from graph node to the name of
     the associated control flow frame(s).
@@ -917,7 +954,9 @@ class Graph(object):
       n: Node in this graph
 
     Returns:
-      Dictionary mapping from nodes in this graph to the names of one or
+      TODO: Fix this documentation
+      Dictionary mapping from nodes in this graph to the names of
+      one or
       more nested frames that will be active when reaching this node.
       The returned value is only valid until this graph is modified, either
       by modifying the link structure of the graph or by changing the
@@ -928,7 +967,8 @@ class Graph(object):
       self._generate_node_to_frame_name()
     return self._node_to_frame_names[n]
 
-  def frame_name_to_nodes(self, frame_name: str) -> Tuple['node.Node']:
+  def frame_name_to_nodes(self, frame_name):
+    # type: (str) -> Tuple[node.Node]
     """
     Performs the inverse mapping of node_to_frame_name().
 
@@ -943,7 +983,8 @@ class Graph(object):
       self._generate_node_to_frame_name()
     return self._frame_name_to_nodes[frame_name]
 
-  def get_frame_names(self) -> Tuple[str]:
+  def get_frame_names(self):
+    # type: () -> Tuple[str]
     """
     Returns:
       Tuple of all the unique names of frames that occur in this graph.
@@ -952,8 +993,11 @@ class Graph(object):
       self._generate_node_to_frame_name()
     return self._frame_name_to_nodes.keys()
 
-  def breadth_first_visitor(self, visitor: GraphVisitor,
-                            starting_nodes: Iterable['node.Node'] = None):
+  def breadth_first_visitor(self,
+                            visitor, # type: GraphVisitor
+                            starting_nodes = None # type: Iterable[node.Node]
+                            ):
+    # type: (...) -> None
     """
     Visit all nodes reachable from a starting set in the order of a
     breadth-first traversal. Invokes a callback at each node visited.
@@ -987,7 +1031,9 @@ class Graph(object):
             enqueued_nodes.add(out_node)
 
   def infer_shapes_and_dtypes(self,
-                              starting_nodes: Iterable['node.Node'] = None):
+                              starting_nodes = None # type: Iterable[node.Node]
+                              ):
+    # type: (...) -> None
     """
     Visit all nodes reachable from a starting set in the order of a
     breadth-first traversal, invoking shape and type inference.
@@ -1051,7 +1097,8 @@ class Graph(object):
     }
 
   @property
-  def colocation_groups(self) -> Dict[str, FrozenSet['node.Node']]:
+  def colocation_groups(self):
+    # type: () -> Dict[str, FrozenSet[node.Node]]
     """
     Generate a table of all groups of nodes that must be on the same device
     according to collocation constrains in the underlying NodeDefs.
@@ -1073,7 +1120,8 @@ class Graph(object):
     return self._head_name_to_coloc_group
 
   @property
-  def signatures(self) -> Dict[str, meta_graph_pb2.SignatureDef]:
+  def signatures(self):
+    # type: () -> Dict[str, meta_graph_pb2.SignatureDef]
     """
     Returns a map from signature name to signature definition. Changes to
     this map will be reflected in this object.
@@ -1081,9 +1129,12 @@ class Graph(object):
     return self._signatures.signature_defs
 
 
-def saved_model_to_graph(saved_model_path: str, tag: str = None,
-                         include_saver: bool = True,
-                         include_signatures: bool = True) -> 'Graph':
+def saved_model_to_graph(saved_model_path, # type: str
+                         tag = None, # type: str
+                         include_saver = True, # type: bool
+                         include_signatures = True # type: bool
+                         ):
+  # type: (...) -> Graph
   """
   Load the contents of a TensorFlow SavedModel into a Graph object.
 
@@ -1163,6 +1214,7 @@ def saved_model_to_graph(saved_model_path: str, tag: str = None,
 
 
 def _decode_graph(graph_def):
+  # type: (tf.GraphDef) -> Dict[str, List[Tuple[tf.DType, tf.TensorShape]]]
   """
   Use public TensorFlow APIs to decode the important information that is not
   explicitly stored in the GraphDef proto, but which must be inferred from the
@@ -1194,9 +1246,8 @@ def _decode_graph(graph_def):
   return output_map
 
 
-def _extract_collection_defs(meta_graph: tf.MetaGraphDef) -> Dict[
-  str, meta_graph_pb2.CollectionDef]:
-
+def _extract_collection_defs(meta_graph):
+  # type: (tf.MetaGraphDef) -> Dict[str, meta_graph_pb2.CollectionDef]
   collections = {}
   for collection_name in meta_graph.collection_def:
     if type(collection_name) is not str:
@@ -1212,7 +1263,8 @@ def _extract_collection_defs(meta_graph: tf.MetaGraphDef) -> Dict[
   return collections
 
 
-def _decode_tensor_name(tensor_name: str, error_msg: str):
+def _decode_tensor_name(tensor_name, error_msg):
+  # type: (str, str) -> Tuple[str, int]
   """
   Args:
     tensor_name: TensorFlow-format name ('node name:input num', or 'node
@@ -1239,10 +1291,13 @@ def _decode_tensor_name(tensor_name: str, error_msg: str):
   return node_name, output_ix
 
 
-def _duplicate_collection_error_str(name: str,
-                                    passthrough_collection_names: Set[str],
-                                    variable_collection_names: Set[str],
-                                    node_collection_names: Set[str]):
+def _duplicate_collection_error_str(
+        name, # type: str
+        passthrough_collection_names, # type: Set[str]
+        variable_collection_names, # type: Set[str]
+        node_collection_names # type: Set[str]
+  ):
+  # type: (...) -> str
   """
   Generate an error string for the case where a collection ends up being of
   multiple types simultaneously.
@@ -1260,6 +1315,7 @@ def _duplicate_collection_error_str(name: str,
 
 
 def _vars_dir_for_saved_model(saved_model_path: str) -> str:
+  # type: (str) -> str
   """
   Args:
     saved_model_path: Root directory of a SavedModel on disk

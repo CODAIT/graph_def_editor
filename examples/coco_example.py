@@ -97,19 +97,22 @@ _PANDA_PIC_URL = ("https://upload.wikimedia.org/wikipedia/commons/f/fe/"
                   "Giant_Panda_in_Beijing_Zoo_1.JPG")
 
 
-def _clear_dir(path: str):
+def _clear_dir(path):
+  # type: (str) -> None
   if os.path.isdir(path):
     shutil.rmtree(path)
   os.mkdir(path)
 
 
 def _protobuf_to_file(pb, path, human_readable_name):
+  # type: (Any, str, str) -> None
   with open(path, "w") as f:
     f.write(str(pb))
   print("{} written to {}".format(human_readable_name, path))
 
 
-def _fetch_or_use_cached(file_name: str, url: str):
+def _fetch_or_use_cached(file_name, url):
+  # type: (str, str) -> str
   """
   Check for a cached copy of the indicated file in our temp directory.
 
@@ -131,6 +134,7 @@ def _fetch_or_use_cached(file_name: str, url: str):
 
 
 def _get_frozen_graph():
+  # type: () -> tf.GraphDef
   """
   Obtains the starting version of the model from the TensorFlow model zoo
 
@@ -146,6 +150,7 @@ def _get_frozen_graph():
 
 
 def _build_preprocessing_graph_def():
+  # type: () -> tf.GraphDef
   """
   Build a TensorFlow graph that performs the preprocessing operations that
   need to happen before the main graph, then convert to a GraphDef.
@@ -183,6 +188,7 @@ def _build_preprocessing_graph_def():
 
 
 def _build_postprocessing_graph_def():
+  # type: () -> tf.GraphDef
   """
   Build the TensorFlow graph that performs postprocessing operations that
   should happen after the main graph.
@@ -235,7 +241,8 @@ def _build_postprocessing_graph_def():
   return result_decode_g.as_graph_def()
 
 
-def _graft_pre_and_post_processing_to_main_graph(g: gde.Graph):
+def _graft_pre_and_post_processing_to_main_graph(g):
+  # type: (gde.Graph) -> None
   """
   Attach pre- and post-processing subgraphs to the main graph.
 
@@ -271,10 +278,9 @@ def _graft_pre_and_post_processing_to_main_graph(g: gde.Graph):
   g.rename_node("decoded_detection_classes", "detection_classes")
 
 
-def _apply_graph_transform_tool_rewrites(g: gde.Graph,
-                                         input_node_names: List[str],
-                                         output_node_names: List[str]) \
-        -> tf.GraphDef:
+def _apply_graph_transform_tool_rewrites(g, input_node_names,
+                                         output_node_names):
+  # type: (gde.Graph, List[str], List[str]) -> tf.GraphDef
   """
   Use the [Graph Transform Tool](
   https://github.com/tensorflow/tensorflow/blob/master/tensorflow/tools/
@@ -309,7 +315,8 @@ def _apply_graph_transform_tool_rewrites(g: gde.Graph,
   return after_tf_rewrites_graph_def
 
 
-def _graph_has_op(g: tf.Graph, op_name: str):
+def _graph_has_op(g, op_name):
+  # type: (tf.Graph, str) -> bool
   """
   A method that really ought to be part of `tf.Graph`. Returns true of the
   indicated graph has an op by the indicated name.
@@ -318,7 +325,8 @@ def _graph_has_op(g: tf.Graph, op_name: str):
   return any(op_name == o.name for o in all_ops_in_graph)
 
 
-def _run_coco_graph(graph_proto: tf.GraphDef, img: np.ndarray):
+def _run_coco_graph(graph_proto, img):
+  # type: (tf.GraphDef, np.ndarray) -> None
   """
   Run an example image through a TensorFlow graph and print a summary of
   the results to STDOUT.
@@ -410,7 +418,7 @@ def main(_):
   after_gde_graph_def = g.to_graph_def(add_shapes=True)
   _protobuf_to_file(after_gde_graph_def,
                     _GDE_REWRITES_GRAPH_FILE,
-                    "Graph after fold_batch_norms_up() rewrite")
+                    "Graph after GraphDef Editor rewrites")
 
   # Dump some statistics about the number of each type of op
   print("            Number of ops in frozen graph: {}".format(len(

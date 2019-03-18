@@ -38,9 +38,12 @@ __all__ = [
 ]
 
 
-def change_batch_size(g: graph.Graph,
-                      new_size: int,
-                      inputs: Iterable[Union[node.Node, tensor.Tensor]]):
+def change_batch_size(
+        g, # type: graph.Graph
+        new_size, # type: int
+        inputs # type: Iterable[Union[node.Node, tensor.Tensor]]
+  ):
+  # type: (...) -> None
   """
   Change the batch size of a model.
 
@@ -78,10 +81,12 @@ def change_batch_size(g: graph.Graph,
   g.infer_shapes_and_dtypes()
 
 
-def _fixed_point_apply(pattern: TreeExpr,
-                       action: Callable[[graph.Graph, Dict[str, node.Node]],
-                                        bool],
-                       g: graph.Graph):
+def _fixed_point_apply(
+        pattern, # type: TreeExpr
+        action, # type: Callable[[graph.Graph, Dict[str, node.Node]],bool]
+        g # type: graph.Graph
+  ):
+  # type: (...) -> None
   """
   Repeatedly apply a pattern-action rule until the graph stops changing.
 
@@ -108,9 +113,11 @@ def _fixed_point_apply(pattern: TreeExpr,
           keep_going = True
 
 
-def _scale_weights(weights_node: node.Node,
-                   scale: np.ndarray,
-                   dims: Tuple[int]):
+def _scale_weights(weights_node, # type: node.Node
+                   scale, # type: np.ndarray
+                   dims # type: Tuple[int]
+                   ):
+  # type: (...) -> None
   """
   Multiply each row/column/dimension of a set of constant weights by a
   scaling factor, in place.
@@ -157,9 +164,11 @@ def _scale_weights(weights_node: node.Node,
   weights_node.replace_attr("value", scaled_weights)
 
 
-def _add_scale_to_conv_weights(conv_node: node.Node,
-                               weights_node: node.Node,
-                               scale: np.ndarray):
+def _add_scale_to_conv_weights(conv_node, # type: node.Node
+                               weights_node, # type: node.Node
+                               scale # type: np.ndarray
+                               ):
+  # type: (...) -> None
   """
   Subroutine of fold_batch_norms() and fold_old_batch_norms().
 
@@ -191,7 +200,8 @@ def _add_scale_to_conv_weights(conv_node: node.Node,
       conv_node.op_type))
 
 
-def fold_batch_norms(g: graph.Graph):
+def fold_batch_norms(g):
+  # type: (graph.Graph) -> None
   """
   Python port of the Graph Transform Tool rewrite by the same name.
 
@@ -210,7 +220,8 @@ def fold_batch_norms(g: graph.Graph):
     )),
     TreeExpr(op="Const", alias="mul_values")))
 
-  def action(_, match_info: Dict[str, node.Node]) -> bool:
+  def action(_, match_info):
+    # type: (Any, Dict[str, node.Node]) -> bool
     mul_node = match_info["mul"]
     conv_node = match_info["conv"]
     weights_node = match_info["weights"]
@@ -247,9 +258,9 @@ def fold_batch_norms(g: graph.Graph):
 
 
 def _get_batch_norm_params(
-        batch_norm_node: node.Node) -> Tuple[np.ndarray, np.ndarray,
-                                             np.ndarray, np.ndarray,
-                                             Any, bool]:
+        batch_norm_node # type: node.Node
+  ):
+  # type: (...) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Any, bool]
   """
   Delve into the inputs of a fused batch normalization node and fetch the
   constant values for the descriptive statistics that define the
@@ -290,7 +301,8 @@ def _get_batch_norm_params(
           scale_after_normalization)
 
 
-def _get_scale_and_offset(match_info: Dict[str, node.Node]):
+def _get_scale_and_offset(match_info):
+  # type: (Dict[str, node.Node]) -> None
   """
   Dig the batch normalization parameters out of a subgraph match and
   compute scale and offset vectors that the normalization applies at
@@ -331,7 +343,11 @@ def _get_scale_and_offset(match_info: Dict[str, node.Node]):
 
 
 def _replace_batch_norm_with_bias_add(
-        g: graph.Graph, match_info: Dict[str, node.Node], offset: np.ndarray):
+        g, # type: graph.Graph
+        match_info, # type: Dict[str, node.Node]
+        offset # type: np.ndarray
+  ):
+  # type: (...) -> None
   """
   Replace the fused batch normalization node in the graph with a BiasAdd
   node that applies the offset from the original normalization.
@@ -388,7 +404,8 @@ def _replace_batch_norm_with_bias_add(
       g.remove_node_by_name(in_tensor.node.name, False)
 
 
-def fold_old_batch_norms(g: graph.Graph):
+def fold_old_batch_norms(g):
+  # type: (graph.Graph) -> None
   """
   Python port of the Graph Transform Tool rewrite by the same name.
 
@@ -425,7 +442,8 @@ def fold_old_batch_norms(g: graph.Graph):
       TreeExpr(op="Const"),
     ))
 
-  def action_1(_, match_info: Dict[str, node.Node]) -> bool:
+  def action_1(_, match_info):
+    # type: (Any, Dict[str, node.Node]) -> bool
     conv_node = match_info["conv"]
     weights_node = match_info["weights"]
 
@@ -456,7 +474,8 @@ def fold_old_batch_norms(g: graph.Graph):
       TreeExpr(op="Const"),
     ))
 
-  def action_2(_, match_info: Dict[str, node.Node]) -> bool:
+  def action_2(_, match_info):
+    # type: (Any, Dict[str, node.Node]) -> bool
     conv_node = match_info["conv"]
     weights_node = match_info["weights"]
 
@@ -494,7 +513,8 @@ def fold_old_batch_norms(g: graph.Graph):
       TreeExpr(op="Const"),
     ))
 
-  def action_3(_, match_info: Dict[str, node.Node]) -> bool:
+  def action_3(_, match_info):
+    # type: (Any, Dict[str, node.Node]) -> bool
     # If there is another direct consumer of anything between a conv and the
     # final output, skip the rewrite
     if len(match_info["conv0"].outputs[0].consumers()) > 1:
@@ -531,7 +551,8 @@ def fold_old_batch_norms(g: graph.Graph):
   _fixed_point_apply(pattern_3, action_3, g)
 
 
-def fold_batch_norms_up(g: graph.Graph):
+def fold_batch_norms_up(g):
+  # type: (graph.Graph) -> None
   """
   Identifies instances of the pattern
   ```
@@ -571,7 +592,8 @@ def fold_batch_norms_up(g: graph.Graph):
       TreeExpr(op="Const", alias="weights")))
   )
 
-  def handle_relu6(relu6_op: node.Node, scale: np.ndarray):
+  def handle_relu6(relu6_op, scale):
+    # type: (node.Node, np.ndarray) -> None
     """
     Additional rewrite logic that replaces a ReLU6 op with a ReLU plus scaled
     minumum.
@@ -590,7 +612,8 @@ def fold_batch_norms_up(g: graph.Graph):
                        cannot_modify=[min_node])
     relu6_op.change_op_type("Relu")
 
-  def action_1(_, match_info: Dict[str, node.Node]) -> bool:
+  def action_1(_, match_info):
+    # type: (Any, Dict[str, node.Node]) -> bool
     conv_node = match_info["conv"]
     add_node = match_info["add"]
     mul_node = match_info["mul"]
@@ -644,7 +667,8 @@ def fold_batch_norms_up(g: graph.Graph):
       TreeExpr(op="Const", alias="weights")))
   )
 
-  def action_2(_, match_info: Dict[str, node.Node]) -> bool:
+  def action_2(_, match_info):
+    # type: (Any, Dict[str, node.Node]) -> bool
     conv_node = match_info["conv"]
     batch_norm_node = match_info["batch_norm"]
     weights_node = match_info["weights"]

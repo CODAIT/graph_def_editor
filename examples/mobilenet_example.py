@@ -65,19 +65,22 @@ _PANDA_PIC_URL = ("https://upload.wikimedia.org/wikipedia/commons/f/fe/"
                   "Giant_Panda_in_Beijing_Zoo_1.JPG")
 _PANDA_PIC_FILE = _TMP_DIR + "/panda.jpg"
 
-def _clear_dir(path: str):
+def _clear_dir(path):
+  # type: (str) -> None
   if os.path.isdir(path):
     shutil.rmtree(path)
   os.mkdir(path)
 
 
 def _protobuf_to_file(pb, path, human_readable_name):
+  # type: (Any, str, str) -> None
   with open(path, "w") as f:
     f.write(str(pb))
   print("{} written to {}".format(human_readable_name, path))
 
 
 def get_keras_frozen_graph():
+  # type: () -> Tuple[tf.GraphDef, str, str]
   """
   Generate a frozen graph for the Keras MobileNet_v2 model.
 
@@ -120,6 +123,7 @@ def get_keras_frozen_graph():
 
 
 def get_slim_frozen_graph():
+  # type: () -> Tuple[tf.GraphDef, str, str]
   """
   Obtains a MobileNet_v2 model from the TensorFlow model zoo
 
@@ -144,7 +148,8 @@ def get_slim_frozen_graph():
             "input", "MobilenetV2/Predictions/Reshape_1")
 
 
-def run_graph(graph_proto, img: np.ndarray, input_node: str, output_node: str):
+def run_graph(graph_proto, img, input_node, output_node):
+  # type: (tf.GraphDef, np.ndarray, str, str) -> None
   """
   Run an example image through a MobileNet-like graph and print a summary of
   the results to STDOUT.
@@ -233,7 +238,11 @@ def main(_):
     print("Downloading {} to {}".format(_PANDA_PIC_URL, _PANDA_PIC_FILE))
     urllib.request.urlretrieve(_PANDA_PIC_URL, _PANDA_PIC_FILE)
   img = np.array(PIL.Image.open(_PANDA_PIC_FILE).resize((224, 224))).astype(
-    np.float) / 128 - 1
+    np.float) # / 128 # - 1
+  # Normalize each channel
+  channel_means = np.mean(img, axis=(0, 1))
+
+  print("Channel means are: {}".format(channel_means))
   print("Image shape is {}".format(img.shape))
 
   print("Frozen graph results:")

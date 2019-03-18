@@ -175,7 +175,11 @@ def filter_ops(ops, positive_filter):
   return ops
 
 
-def filter_ops_by_optype(ops, op_types: Union[str, List[str], Tuple[str]]):
+def filter_ops_by_optype(
+        ops,
+        op_types # type: Union[str, List[str], Tuple[str]]
+  ):
+  # type: (...) -> List[node.Node]
   """
   Filter out all ops that do not have op types in a provided list of types.
 
