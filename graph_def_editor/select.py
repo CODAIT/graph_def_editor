@@ -24,7 +24,9 @@ import re
 from six import iteritems
 from six import string_types
 import textwrap
-from typing import Any, Dict, List, Iterable, Tuple, Union
+import sys
+if sys.version >= '3':
+  from typing import Dict, List, Iterable, Tuple, Union
 
 from graph_def_editor import util
 from graph_def_editor.graph import Graph
@@ -831,10 +833,10 @@ class TreeExpr(object):
   """
 
   def __init__(self,
-               alias: str = None,
-               op: str = None,
-               optional: bool = None,
-               inputs: Union["TreeExpr", Iterable["TreeExpr"]] = None,
+               alias=None, # type: str
+               op=None, # type: str
+               optional=None, # type: bool
+               inputs=None # type: Union["TreeExpr", Iterable["TreeExpr"]]
                ):
     """
     Args:
@@ -887,7 +889,10 @@ class TreeExpr(object):
   def __str__(self):
     return repr(self)
 
-  def eval_from(self, potential_root_node: Node) -> Dict[str, Node]:
+  def eval_from(self,
+                potential_root_node # type: Node
+                ):
+    # type: (...) -> Dict[str, Node]
     """
     Evaluate a tree expression starting from a potential root node.
 
@@ -914,7 +919,9 @@ class TreeExpr(object):
     else:
       return None
 
-  def _eval_without_optional(self, potential_root_node: Node):
+  def _eval_without_optional(self,
+                             potential_root_node # type: Node
+                             ):
     """
     Handle every part of the expression except the "optional" clause.
     """

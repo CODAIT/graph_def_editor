@@ -22,7 +22,9 @@ from __future__ import print_function
 
 import collections
 import re
-from typing import Any, List
+import sys
+if sys.version >= '3':
+  from typing import Any, List
 
 import numpy as np
 from six import iteritems
@@ -263,8 +265,8 @@ def make_list_of_op(ops, check_graph=True, allow_graph=True, ignore_ts=False):
     return [op for op in ops if isinstance(op, node.Node)]
 
 
-def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False) \
-  -> List[tensor.Tensor]:
+def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False):
+  # type: (...) -> List[tensor.Tensor]
   """Convert ts to a list of `gde.Tensor`.
 
   Args:
@@ -332,7 +334,9 @@ def get_consuming_ops(ts):
 class ControlOutputs(object):
   """The control outputs topology."""
 
-  def __init__(self, g: 'graph.Graph'):
+  def __init__(self,
+               g # type: graph.Graph
+               ):
     """Create a dictionary of control-output dependencies.
 
     Args:
@@ -441,8 +445,12 @@ def placeholder_name(t=None, scope=None, prefix=_DEFAULT_PLACEHOLDER_PREFIX):
     return "{}{}".format(scope, prefix)
 
 
-def make_placeholder_from_tensor(g: 'graph.Graph', t: tensor.Tensor, scope=None,
-                                 prefix=_DEFAULT_PLACEHOLDER_PREFIX):
+def make_placeholder_from_tensor(
+        g, # type: graph.Graph
+        t, # type: tensor.Tensor
+        scope=None,
+        prefix=_DEFAULT_PLACEHOLDER_PREFIX
+        ):
   """Create a `gde.Node` representing a `tf.placeholder` for the Graph Editor.
 
   Note that the correct graph scope must be set by the calling function.
@@ -558,8 +566,10 @@ def find_corresponding(targets, dst_graph, dst_scope="", src_scope=""):
   return transform_tree(targets, func)
 
 
-def _python_type_to_attr_list_elem(list_value: tf.AttrValue.ListValue,
-                                   elem: Any):
+def _python_type_to_attr_list_elem(
+        list_value, # type: tf.AttrValue.ListValue
+        elem # type: Any
+  ):
   """
   Subroutine of python_type_to_attr_value(). Converts one element of a Python
   list to one element of a `tf.AttrValue.ListValue` protobuf.
@@ -590,7 +600,9 @@ def _python_type_to_attr_list_elem(list_value: tf.AttrValue.ListValue,
                      "tf.AttrValue.ListValue".format(type(elem)))
 
 
-def python_type_to_attr_value(value: Any) -> tf.AttrValue:
+def python_type_to_attr_value(value #type: Any
+                              ):
+  # type (...) -> tf.AttrValue
   """
   Convert a Python object or scalar value to a TensorFlow `tf.AttrValue`
   protocol buffer message.
@@ -638,7 +650,9 @@ def python_type_to_attr_value(value: Any) -> tf.AttrValue:
                      "tf.AttrValue".format(type(value)))
 
 
-def attr_value_to_python_type(attr_value: tf.AttrValue) -> Any:
+def attr_value_to_python_type(attr_value # type: tf.AttrValue
+                              ):
+  # type (...) -> Any
   """
   Inverse of python_type_to_attr_value().
 
@@ -674,7 +688,8 @@ def attr_value_to_python_type(attr_value: tf.AttrValue) -> Any:
                      "a Python object".format(attr_value))
 
 
-def load_variables_to_tf_graph(g: 'graph.Graph'):
+def load_variables_to_tf_graph(g # type: graph.Graph
+                               ):
   """
   Convenience function to load all variables present in a `gde.Graph` into
   the current default TensorFlow graph, without generating a MetaGraphDef.
@@ -690,8 +705,11 @@ def load_variables_to_tf_graph(g: 'graph.Graph'):
     tf.add_to_collections(var.collection_names, tf_var)
 
 
-def make_const(g: 'graph.Graph', name: str, value: np.ndarray,
-               uniquify_name: bool = False):
+def make_const(g, # type: graph.Graph
+               name, # type: str
+               value, # type: np.ndarray
+               uniquify_name=False # type: bool
+               ):
   """
   Convenience method to add a `Const` op to a `gde.Graph`.
 
@@ -713,9 +731,12 @@ def make_const(g: 'graph.Graph', name: str, value: np.ndarray,
   return ret
 
 
-def make_placeholder(g: 'graph.Graph', name: str, dtype: tf.DType,
-                     shape: tf.TensorShape,
-                     uniquify_name: bool = False):
+def make_placeholder(g, # type: graph.Graph
+                     name, # type: str
+                     dtype, # type: tf.DType
+                     shape, #type: tf.TensorShape
+                     uniquify_name=False # type: bool
+                     ):
   """
   Convenience method to add a `Placeholder` op to a `gde.Graph`.
 
@@ -736,8 +757,11 @@ def make_placeholder(g: 'graph.Graph', name: str, dtype: tf.DType,
   return ret
 
 
-def make_identity(g: 'graph.Graph', name: str, input: 'tensor.Tensor',
-                  uniquify_name: bool = False):
+def make_identity(g, # type: graph.Graph
+                  name, # type: str
+                  input, # type: tensor.Tensor
+                  uniquify_name=False # type: bool
+                  ):
   """
   Convenience method to add an `Identity` op to a `gde.Graph`.
 
@@ -758,9 +782,14 @@ def make_identity(g: 'graph.Graph', name: str, input: 'tensor.Tensor',
   return ret
 
 
-def make_simple_binary_op(g: 'graph.Graph', name: str, op_name: str,
-                          input_1: tensor.Tensor, input_2: tensor.Tensor,
-                          dtype = None, uniquify_name: bool = False):
+def make_simple_binary_op(g, # type: graph.Graph
+                          name, # type: str
+                          op_name, # type: str
+                          input_1, # type: tensor.Tensor
+                          input_2, # type: tensor.Tensor
+                          dtype=None, # type: tf.DType
+                          uniquify_name=False # type: bool
+                          ):
   """
   Convenience method to cover the common case of binary ops. To be used with
   this pattern, ops must satisfy the following:

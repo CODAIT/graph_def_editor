@@ -14,7 +14,9 @@
 # ==============================================================================
 
 import tensorflow as tf
-from typing import AbstractSet
+import sys
+if sys.version >= '3':
+  from typing import AbstractSet
 
 __all__ = [
   "Tensor",
@@ -27,7 +29,12 @@ class Tensor(object):
   a tf.Tensor in the TensorFlow Python API, though serialized TensorFlow graphs
   do not contain any separate objects that represent tensors.
   """
-  def __init__(self, node, index, dtype: tf.DType, shape: tf.shape):
+  def __init__(self,
+               node,
+               index,
+               dtype, # type: tf.DType,
+               shape # type: tf.shape
+               ):
     """
     Args:
       node: gde.Node object that represents the graph node that produces this
@@ -69,19 +76,25 @@ class Tensor(object):
     return self._index
 
   @property
-  def dtype(self) -> tf.DType:
+  def dtype(self):
+    # type () -> tf.DType:
     return self._dtype
 
   @dtype.setter
-  def dtype(self, value: tf.DType):
+  def dtype(self,
+            value # type: tf.DType
+            ):
     self._dtype = value
 
   @property
-  def shape(self) -> tf.TensorShape:
+  def shape(self):
+    # type () -> tf.TensorShape
     return self._shape
 
   @shape.setter
-  def shape(self, value: tf.TensorShape):
+  def shape(self,
+            value # type: tf.TensorShape
+            ):
     self._shape = value
 
   @property
@@ -112,14 +125,17 @@ class Tensor(object):
     return "{}:{}".format(self.node.name, self.value_index)
 
   @property
-  def collection_names(self) -> AbstractSet[str]:
+  def collection_names(self):
+    # type -> AbstractSet[str]
     """
     Returns the names of all collections this tensor is a member of in the
     parent graph.
     """
     return frozenset(self._collection_names)
 
-  def add_to_collection(self, collection_name: str):
+  def add_to_collection(self,
+                        collection_name # type: str
+                        ):
     """
     Add the tensor to the indicated collection.
     """

@@ -19,7 +19,9 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
-from typing import Tuple, List, Iterable, Any, AbstractSet, Sized
+import sys
+if sys.version >= '3':
+  from typing import Tuple, List, Iterable, Any, AbstractSet
 
 from graph_def_editor import graph, tensor, util
 
@@ -815,7 +817,8 @@ def _decode_control_inputs(inputs, # type: Iterable[str]
   return [g[name] for name in control_input_names]
 
 
-def _validate_colocation_group_attr(value: Any) -> List[str]:
+def _validate_colocation_group_attr(value):
+  # type: (Any) -> List[str]
   """Validate a potential value for the special "_class" attribute that
   holds collocation groups.
 
