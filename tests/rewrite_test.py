@@ -28,7 +28,11 @@ import graph_def_editor as gde
 
 class RewriteTest(unittest.TestCase):
 
-  def assertClose(self, expected: np.ndarray, actual: np.ndarray, delta: float):
+  def assertClose(self,
+                  expected, # type: np.ndarray
+                  actual, # type: np.ndarray
+                  delta, # type: float
+                  ):
     """
     Assert that all values in two arrays are within a certain distance of
     each other.
@@ -385,7 +389,8 @@ class RewriteTest(unittest.TestCase):
     Version of test_fold_fused_batch_norms() with a depthwise convolution op
     """
     # We try this test with channel multipliers of 1 and 2
-    def run_test(channel_multiplier_is_one: bool):
+    def run_test(channel_multiplier_is_one # type: bool
+                 ):
       input_data = (
         np.array([1., 4., 2., 5., 3., 6., -1., -4., -2., -5., -3., -6.],
                  dtype=np.float32).reshape([1, 1, 6, 2])
@@ -456,7 +461,8 @@ class RewriteTest(unittest.TestCase):
     """
     # Run the test twice, changing how we concatenate the outputs of our two
     # convolutions.
-    def run_test(split: bool):
+    def run_test(split # type: bool
+                 ):
       """
       Args:
         split: if True, concatenate along channels dimension

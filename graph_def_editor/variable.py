@@ -17,14 +17,15 @@
 #  tf.core.framework
 from tensorflow.core.framework import variable_pb2
 
-from typing import AbstractSet, Union
+import sys
+if sys.version >= '3':
+  from graph_def_editor import graph
+  from typing import AbstractSet, Union
 
 
 __all__ = [
   "Variable",
 ]
-
-from graph_def_editor import graph
 
 
 class Variable(object):
@@ -41,7 +42,9 @@ class Variable(object):
   TensorFlow's Python API has a class `tf.Variable` that tracks these
   objects. This class tracks a similar set of pointers in protobuf land.
   """
-  def __init__(self, g: 'graph.Graph'):
+  def __init__(self,
+               g # type: graph.Graph
+               ):
     """
     Do not call this constructor directly.
 
@@ -75,7 +78,9 @@ class Variable(object):
                                    self._snapshot_name,
                                    self._trainable)
 
-  def is_same_variable(self, other: 'Variable'):
+  def is_same_variable(self,
+                       other # type: Variable
+                       ):
     """
     Returns true if is variable and `other` are the same, ignoring graph and
     collection information.
@@ -93,8 +98,11 @@ class Variable(object):
     else:
       return True
 
-  def from_proto(self, variable_def: Union[variable_pb2.VariableDef, bytes],
-                 validate: bool = True, allow_duplicates: bool = False):
+  def from_proto(self,
+                 variable_def, # type: Union[variable_pb2.VariableDef, bytes]
+                 validate=True, # type: bool
+                 allow_duplicates=False # type: bool
+                 ):
     """
     Populate the fields of this object from a serialized TensorFlow variable.
 
@@ -142,7 +150,9 @@ class Variable(object):
     ret.trainable = self._trainable
     return ret
 
-  def validate(self, allow_duplicate: bool = False):
+  def validate(self,
+               allow_duplicate=False # type: bool
+               ):
     """
     Verify that all the names this variable references are valid in the
     parent graph and that no conflicting variables exist.
@@ -171,7 +181,8 @@ class Variable(object):
     _ = self.graph.get_tensor_by_name(self._snapshot_name,
                                       "Invalid snapshot name '{}': {}")
 
-  def to_proto(self) -> variable_pb2.VariableDef:
+  def to_proto(self):
+    # type: () -> variable_pb2.VariableDef
     """
     Convert this object into its equivalent TensorFlow protocol buffer
     message.
@@ -198,7 +209,9 @@ class Variable(object):
     return self._variable_name
 
   @name.setter
-  def name(self, val: str):
+  def name(self,
+           val # type: str
+           ):
     # TODO(frreiss): Should we update the graph here?
     self._variable_name = val
 
@@ -219,14 +232,17 @@ class Variable(object):
     return self._trainable
 
   @property
-  def collection_names(self) -> AbstractSet[str]:
+  def collection_names(self):
+    # type: () -> AbstractSet[str]
     """
     Returns the names of all collections this variable is a member of in the
     parent graph.
     """
     return frozenset(self._collection_names)
 
-  def add_to_collection(self, collection_name: str):
+  def add_to_collection(self,
+                        collection_name # type: str
+                        ):
     """
     Add the variable to the indicated collection.
     """

@@ -26,7 +26,9 @@ from six import iterkeys
 from six import string_types
 from six import StringIO
 import tensorflow as tf
-from typing import Iterable
+import sys
+if sys.version >= '3':
+  from typing import Iterable
 
 from graph_def_editor import select, subgraph, util
 from graph_def_editor.node import Node
@@ -136,9 +138,12 @@ def transform_op_if_inside_handler(info, op, keep_if_possible=True):
       return None
 
 
-def copy_op_handler(info, op: Node, new_inputs: Iterable[Tensor],
-                    copy_shape_and_dtype: bool = False,
-                    nodedef_fn=None):
+def copy_op_handler(info,
+                    op, # type: node.Node
+                    new_inputs, # type: Iterable[Tensor]
+                    copy_shape_and_dtype=False, # type: bool
+                    nodedef_fn=None
+                    ):
   """Copy a node into the target graph.
 
   Args:
@@ -327,7 +332,11 @@ class _TmpInfo(object):
   argument to the handlers.
   """
 
-  def __init__(self, sgv, dst_graph: Graph, dst_scope, src_scope):
+  def __init__(self,
+               sgv,
+               dst_graph, #type: Graph
+               dst_scope,
+               src_scope):
     self.sgv = sgv
     self.sgv_inputs_set = frozenset(sgv.inputs)
     self.ops = frozenset(sgv.ops)

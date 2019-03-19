@@ -25,7 +25,9 @@ from __future__ import print_function
 
 import numpy as np
 import tensorflow as tf
-from typing import Tuple, Dict, Iterable, Union, Callable, Any
+import sys
+if sys.version >= '3':
+  from typing import Tuple, Dict, Iterable, Union, Callable, Any
 
 from graph_def_editor import graph, node, reroute, tensor, util
 
@@ -570,7 +572,8 @@ def fold_batch_norms_up(g):
   ```
     ReLU => Min(6 / multiplier from batch norm)
   """
-  def compute_input_dim(n: node.Node):
+  def compute_input_dim(n #type: node.Node
+                        ):
     if n.op_type == "Conv2D" or n.op_type == "DepthwiseConv2dNative":
       return 2
     elif n.op_type == "MatMul":
