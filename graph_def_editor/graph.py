@@ -240,6 +240,10 @@ class Graph(object):
     Unpack a `tf.MetaGraphDef.CollectionDefEntry` of serialized variables 
     into a collection of variables in this graph. The collection must not exist. 
     Variables that do not already exist will be created.
+
+    Note that this method is intended to be used to bulk-load a collection.
+    To add individual items to a collection one-by-one, call the
+    `add_to_collection` methods of `Node`, etc., objects.
     
     Args:
       collection_name: Name of collection
@@ -271,7 +275,8 @@ class Graph(object):
       if self._collection_name_to_type is not None:
         self._collection_name_to_type[collection_name] = "passthrough"
     else:
-      raise ValueError("Unknown collection with name: {}".format(collection_name))
+      raise ValueError("Unknown collection with name: {}".format(
+        collection_name))
 
   def __getitem__(self, name):
     # type: (str) -> Union[tensor.Tensor, 'node.Node']

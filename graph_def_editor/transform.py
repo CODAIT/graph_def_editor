@@ -34,6 +34,7 @@ from graph_def_editor import select, subgraph, util
 from graph_def_editor.node import Node
 from graph_def_editor.graph import Graph
 from graph_def_editor.tensor import Tensor
+from graph_def_editor.variable import Variable
 
 
 __all__ = [
@@ -93,6 +94,7 @@ def keep_t_if_possible_handler(info, t):
 
 
 def assign_renamed_collections_handler(info, elem, elem_):
+  # type: (_TmpInfo, Any, Any) -> None
   """Add the transformed elem to the (renamed) collections of elem.
 
   A collection is renamed only if is not a known key, as described in
@@ -112,7 +114,14 @@ def assign_renamed_collections_handler(info, elem, elem_):
       transformed_name = name
     else:
       transformed_name = info.new_name(name)
-    info.graph_.add_to_collection(transformed_name, elem_)
+
+    target_graph = info.graph_ # type: Graph
+    if isinstance(elem_, (Node, Tensor, Variable)):
+      elem_.add_to_collection(transformed_name)
+    else:
+      raise NotImplementedError("Don't know how to add name '{}' to target "
+                                "graph as a collection item (target collection "
+                                "name {})".format(elem_, transformed_name))
 
 
 def transform_op_if_inside_handler(info, op, keep_if_possible=True):
@@ -334,14 +343,14 @@ class _TmpInfo(object):
 
   def __init__(self,
                sgv,
-               dst_graph, #type: Graph
+               dst_graph, # type: Graph
                dst_scope,
                src_scope):
     self.sgv = sgv
     self.sgv_inputs_set = frozenset(sgv.inputs)
     self.ops = frozenset(sgv.ops)
     self.control_outputs = util.ControlOutputs(sgv.graph)
-    self.graph = sgv.graph
+    self.graph = sgv.graph # type: Graph
     self.scope = src_scope
     self.graph_ = dst_graph
     self.scope_ = dst_scope

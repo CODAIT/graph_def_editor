@@ -176,7 +176,7 @@ class TransformTest(unittest.TestCase):
     #   _ = tf.constant(10.0, shape=[10], name="Input")
     # New code adds node as a NodeDef
     ten_node = gde.make_const(self.graph, "Ten", np.full([10], 10.,
-                                                                      dtype=np.float32))
+                              dtype=np.float32))
 
     ten_tensor = ten_node.output(0)
     sgv, _ = gde.copy_with_input_replacements(
@@ -195,6 +195,20 @@ class TransformTest(unittest.TestCase):
     print("val is {}".format(val))
     self.assertNear(
       np.linalg.norm(val - np.array([11])), 0.0, ERROR_TOLERANCE)
+
+
+  def test_copy_with_collection(self):
+    """Test for issue #36"""
+    tmp_graph = tf.Graph()
+    with tmp_graph.as_default():
+      c = tf.constant(42, name="FortyTwo")
+      tmp_graph.add_to_collection("Answers", c)
+
+    g = gde.Graph(tmp_graph)
+    g2 = gde.Graph()
+    gde.transform.copy(g, g2)
+    self.assertTrue("Answers" in g2.get_all_collection_keys())
+
 
   @staticmethod
   def _create_replace_graph():
