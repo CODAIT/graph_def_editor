@@ -119,9 +119,12 @@ def assign_renamed_collections_handler(info, elem, elem_):
     if isinstance(elem_, (Node, Tensor, Variable)):
       elem_.add_to_collection(transformed_name)
     else:
-      raise NotImplementedError("Don't know how to add name '{}' to target "
+      raise NotImplementedError("Unable to add name '{}' to target "
                                 "graph as a collection item (target collection "
-                                "name {})".format(elem_, transformed_name))
+                                "name {}) because the object doesn't "
+                                "have an implementation of "
+                                "add_to_collection()"
+                                "".format(elem_, transformed_name))
 
 
 def transform_op_if_inside_handler(info, op, keep_if_possible=True):
