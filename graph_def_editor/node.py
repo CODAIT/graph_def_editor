@@ -345,7 +345,7 @@ class Node(object):
     return tuple(self._colocation_groups)
 
   @colocation_groups.setter
-  def colocation_groups(self):
+  def colocation_groups(self, value):
     # type: (Iterable[str]) -> None
     """
     Setter for the `colocation_groups` property.
