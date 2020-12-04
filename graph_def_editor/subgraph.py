@@ -24,7 +24,6 @@ import copy
 import six
 from six import iteritems
 from six import StringIO
-import tensorflow as tf
 
 from graph_def_editor import select, util
 from graph_def_editor import graph as gde_graph

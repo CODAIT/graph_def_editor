@@ -24,7 +24,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import sys
 if sys.version >= '3':
   from typing import Tuple, Dict, Iterable, Union, Callable, Any

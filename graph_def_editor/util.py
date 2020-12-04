@@ -28,7 +28,7 @@ if sys.version >= '3':
 
 import numpy as np
 from six import iteritems, string_types
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 
 from graph_def_editor import graph, node, tensor
 

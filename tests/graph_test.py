@@ -18,8 +18,8 @@ Tests for graph.py in the GraphDef Editor
 """
 
 import unittest
-import tensorflow as tf
-import numpy as np
+import tensorflow.compat.v1 as tf
+tf.disable_eager_execution()
 import shutil
 import tempfile
 

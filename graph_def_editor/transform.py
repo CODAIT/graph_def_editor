@@ -25,7 +25,7 @@ from six import iteritems
 from six import iterkeys
 from six import string_types
 from six import StringIO
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import sys
 if sys.version >= '3':
   from typing import Iterable

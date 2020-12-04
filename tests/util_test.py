@@ -18,7 +18,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_eager_execution()
+
 import unittest
 
 import graph_def_editor as gde
@@ -59,7 +61,7 @@ class UtilTest(unittest.TestCase):
     a0, b0, a1, b1 = (g0["a"], g0["b"], g1["a"], g1["b"])
 
     print("g0['a'] returns {} (type {})".format(g0['a'], type(g0['a'])))
-    
+
     # Same graph, should be fine.
     self.assertIsNone(gde.util.check_graphs(a0, b0))
     # Two different graphs, should assert.
@@ -198,4 +200,4 @@ class UtilTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-  unittest.TestCase.main()
+  unittest.main()

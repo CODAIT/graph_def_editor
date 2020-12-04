@@ -126,5 +126,22 @@ $ pip install ./graph_def_editor
    `test.out` at the root of the project.
 
 
+## TensorFlow versions compartibility
+
+GraphDef Editor is fully supported for TensorFlow versions 1.14.x and 1.15.x.
+For TensorFlow 2.x some transforms might not work.
+
+To execute tests for specific TensorFlow version run following comand from the repository root:
+```sh
+docker run -v ${PWD}:/v -w /v tensorflow/tensorflow:<version>[-py3] bash -c "pip3 install -U pytest && pytest"
+```
+
+Pre 2.2.0 TensorFlow versions have -py3 suffix indicating that Python3 should be used.
+
+To execute specific test:
+```sh
+docker run -v ${PWD}:/v -w /v tensorflow/tensorflow:<version>[-py3] python -m tests.transform_test
+```
+
 
 
