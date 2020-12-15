@@ -20,7 +20,9 @@ Tests for rewrite.py in the GraphDef Editor
 import shutil
 import tempfile
 import unittest
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_eager_execution()
+
 import numpy as np
 
 import graph_def_editor as gde
@@ -759,3 +761,7 @@ class RewriteTest(unittest.TestCase):
     # Make sure the rewrite happened
     for n in g.nodes:
       self.assertNotEqual(n.op_type, "FusedBatchNorm")
+
+
+if __name__ == "__main__":
+  unittest.main()

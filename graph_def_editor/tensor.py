@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import sys
 if sys.version >= '3':
   from typing import AbstractSet

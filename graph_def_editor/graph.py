@@ -22,7 +22,7 @@ import datetime
 from distutils import dir_util
 import os
 from six import string_types
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import sys
 if sys.version >= '3':
   from typing import Tuple, Dict, FrozenSet, Iterable, Union, Set, Any

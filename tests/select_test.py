@@ -20,7 +20,9 @@ from __future__ import print_function
 
 import re
 
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_eager_execution()
+
 import unittest
 
 import graph_def_editor as gde
