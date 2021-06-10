@@ -26,7 +26,6 @@ setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     packages=find_packages(),
-    install_requires=['tensorflow', 'six'],
     include_package_data=True,
     zip_safe=False,
     classifiers=[
