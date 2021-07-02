@@ -582,18 +582,23 @@ def fold_batch_norms_up(g):
       raise ValueError("Unexpected op type {}".format(n.op_type))
 
   pattern_1 = (
-    TreeExpr(op="Conv2D|MatMul|DepthwiseConv2dNative", alias="conv", inputs=(
-      TreeExpr(op="Relu|Relu6", alias="relu", optional=True, inputs=(
-        TreeExpr(op="Add", alias="add", inputs=(
-          TreeExpr(op="Mul", alias="mul", inputs=(
-            TreeExpr(),
-            TreeExpr(op="Const", alias="mul_values")
-          )),
-          TreeExpr(op="Const", alias="add_values")
-        ))
-      )),
-      TreeExpr(op="Const", alias="weights")))
-  )
+      TreeExpr(
+          op="Conv2D|MatMul|DepthwiseConv2dNative",
+          alias="conv",
+          inputs=(TreeExpr(
+              op="Relu|Relu6",
+              alias="relu",
+              optional=True,
+              inputs=(TreeExpr(
+                  op="Add|AddV2",
+                  alias="add",
+                  inputs=(TreeExpr(
+                      op="Mul",
+                      alias="mul",
+                      inputs=(TreeExpr(),
+                              TreeExpr(op="Const", alias="mul_values"))),
+                          TreeExpr(op="Const", alias="add_values"))))),
+                  TreeExpr(op="Const", alias="weights"))))
 
   def handle_relu6(relu6_op, scale):
     # type: (node.Node, np.ndarray) -> None

@@ -54,7 +54,9 @@ class MatchTest(unittest.TestCase):
         gde.OpMatcher("^.*/f$").input_ops(True, "^.*/d$")(self.f_op))
     self.assertTrue(
         gde.OpMatcher("^.*/f$").input_ops(
-            gde.op_type("Add"), gde.op_type("Const"))(self.f_op))
+            gde.op_type("Add"), gde.op_type("Const"))(self.f_op) or
+        gde.OpMatcher("^.*/f$").input_ops(
+            gde.op_type("AddV2"), gde.op_type("Const"))(self.f_op))
     self.assertTrue(
         gde.OpMatcher("^.*/f$").input_ops("^.*/c$", "^.*/d$")
         .output_ops(gde.OpMatcher("^.*/h$")

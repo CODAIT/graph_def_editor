@@ -23,6 +23,7 @@ from __future__ import division
 from __future__ import print_function
 
 # pylint: disable=wildcard-import
+from graph_def_editor.base_graph import *
 from graph_def_editor.edit import *
 from graph_def_editor.graph import *
 from graph_def_editor.match import *
