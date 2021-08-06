@@ -281,6 +281,7 @@ class TransformTest(unittest.TestCase):
     self.assertEqual(res[0].name, "b:0")
     self.assertEqual(res[1].name, "c_1:0")
 
+  @unittest.skipIf(tf.version.VERSION[0] == "2", "not supported in TF2.x")
   def test_graph_replace_gradients(self):
     tmp_graph = tf.Graph()
     with tmp_graph.as_default():
@@ -310,6 +311,7 @@ class TransformTest(unittest.TestCase):
     self.assertNear(g_val, 0.0, ERROR_TOLERANCE)
     self.assertNear(res_val, 0.0, ERROR_TOLERANCE)
 
+  @unittest.skipIf(tf.version.VERSION[0] == "2", "not supported in TF2.x")
   def test_graph_while_loop(self):
     tf_graph = tf.Graph()
     with tf_graph.as_default():
@@ -340,6 +342,7 @@ class TransformTest(unittest.TestCase):
                            feed_dict={copied_max_index_tensor.name: n})
         self.assertEqual(sum_val, 55)
 
+  @unittest.skipIf(tf.version.VERSION[0] == "2", "not supported in TF2.x")
   def test_graph_cond(self):
     tf_g = tf.Graph()
     with tf_g.as_default():

@@ -23,7 +23,7 @@ import sys
 if sys.version >= '3':
   from typing import Tuple, List, Iterable, Any, AbstractSet, Type
 
-from graph_def_editor import graph, tensor, util
+from graph_def_editor import base_graph, tensor, util
 
 # Magical attribute name that TensorFlow uses to store colocation groups.
 # See colocation_groups property below for more information.
@@ -41,6 +41,9 @@ _OUTPUT_SHAPES_ATTR_NAME = "_output_shapes"
 __all__ = [
     "Node",
 ]
+
+PARTITIONED_CALL_OP_TYPES = frozenset([
+    "PartitionedCall", "StatefulPartitionedCall", "TPUPartitionedCall"])
 
 def _type_check(obj: Any, expected_type: Type, arg_name: str):
   """
@@ -64,11 +67,12 @@ class Node(object):
   tf.NodeDef protobuf on demand.
   """
   def __init__(self,
-               g,  # type: graph.Graph
-               node_id,  # type: int
-               name,  # type: str
-               op_name,  # type: str
-               device=""  # type: str
+               g, # type: graph.Graph
+               node_id, # type: int
+               name, # type: int
+               op_name, # type: str
+               device = "", # type: str
+               debug_info = None # type: tf.compat.v1.NodeDef.ExperimentalDebugInfo
                ):
     """
     This constructor should only be called from methods of the Graph
@@ -83,7 +87,7 @@ class Node(object):
       device: TensorFlow device specification string indicating where this node
         should be located. Default value of "" means "use the default device"
     """
-    _type_check(g, graph.Graph, "g")
+    _type_check(g, base_graph.BaseGraph, "g")
     _type_check(node_id, int, "node_id")
     _type_check(name, str, "name")
     _type_check(op_name, str, "op_name")
@@ -99,10 +103,14 @@ class Node(object):
     self._control_inputs = []
     self._colocation_groups = []  # List[str]
     self._collection_names = set()  # Set[str]
+    self._debug_info = debug_info
 
   def __repr__(self):
     # type: () -> str
-    return "Node[{}|{}]".format(self.name, self.op_type)
+    if self.op_type in PARTITIONED_CALL_OP_TYPES and self.has_attr("f"):
+      return "Node[{}({})|{}]".format(self.name, self.get_attr("f").name, self.op_type)
+    else:
+      return "Node[{}|{}]".format(self.name, self.op_type)
 
   @property
   def name(self):
@@ -435,20 +443,22 @@ class Node(object):
     for (attr_name, attr_value) in self._attributes:
       # Funky syntax for setting a field of a union in a protobuf
       target.attr[attr_name].CopyFrom(
-        util.python_type_to_attr_value(attr_value))
+        util.python_type_to_attr_value(attr_value, attr_name))
     if len(self._colocation_groups) > 0:
       # Serialize colocation groups. See docstring in getter for
       # colocation_groups property for more information.
       transformed_names = [_COLOCATION_PREFIX + name
                            for name in self._colocation_groups]
       target.attr[_COLOCATION_ATTR_NAME].CopyFrom(
-        util.python_type_to_attr_value(transformed_names)
+        util.python_type_to_attr_value(transformed_names, _COLOCATION_ATTR_NAME)
       )
     if add_shapes and self._outputs is not None and len(self._outputs) > 0:
       shapes_list = [t.shape for t in self._outputs]
       target.attr[_OUTPUT_SHAPES_ATTR_NAME].CopyFrom(
-        util.python_type_to_attr_value(shapes_list)
+        util.python_type_to_attr_value(shapes_list, _OUTPUT_SHAPES_ATTR_NAME)
       )
+    if self._debug_info is not None:
+      target.experimental_debug_info.CopyFrom(self._debug_info)
     return target
 
   def get_attr(self, key):
@@ -477,7 +487,7 @@ class Node(object):
                        "under key '{}'".format(self, key))
     ret = matches[0]
     if isinstance(ret, tf.AttrValue):
-      return util.attr_value_to_python_type(ret)
+      return util.attr_value_to_python_type(ret, key)
     else:
       return ret
 
@@ -489,7 +499,7 @@ class Node(object):
 
     Returns True if the node has an attribute under the indicated key
     """
-    return key in self._attributes
+    return key in self.get_attr_keys()
 
   def get_attr_keys(self):
     # type: () -> Tuple[str]
@@ -708,7 +718,7 @@ class Node(object):
 
         # TODO(frreiss): If this op has a "T" attribute, set that too.
 
-  def set_inputs_from_strings(self, new_inputs, set_control_inputs = True):
+  def set_inputs_from_strings(self, new_inputs, set_control_inputs = True, output_map = None):
     # type: (Iterable[str], bool) -> None
     """
     Set all input at once, converting TensorFlow string-format inputs into
@@ -723,7 +733,7 @@ class Node(object):
         Otherwise , this method will ignore any strings that describe control
         inputs.
     """
-    self._inputs = _decode_inputs(new_inputs, self._graph)
+    self._inputs = _decode_inputs(new_inputs, self._graph, output_map)
     if set_control_inputs:
       self._control_inputs = _decode_control_inputs(new_inputs, self._graph)
     self._graph.increment_version_counter()  # New edges added to graph
@@ -776,7 +786,8 @@ def _canonicalize_output_name(name):
 
 
 def _decode_inputs(inputs, # type: Iterable[str]
-                   g # type: graph.Graph
+                   g, # type: graph.Graph
+                   outputs_map  # type: Mapping[str:(...)]
   ):
   # type: (...) -> List[tensor.Tensor]
   """
@@ -798,6 +809,7 @@ def _decode_inputs(inputs, # type: Iterable[str]
   #   "^node_name" --> Control input from indicated node
   #   "node_name" --> Input from output number 0 of indicated node
   #   "node_name:ix" --> Input from output number <ix> of indicated node
+  #   "node_name:arg_def_name:ix" --> Input from arg_def's output number <ix> of indicated node
   # Start by filtering out the control inputs and turning "node_name" into
   # "node_name:0".
   input_names = [_canonicalize_output_name(n) for n in inputs
@@ -805,9 +817,36 @@ def _decode_inputs(inputs, # type: Iterable[str]
   input_tensors = []
   for name in input_names:
     # Name is in form "node:output number"
-    node_name, output_ix_name = name.split(":")
-    output_ix = int(output_ix_name)
-    input_tensors.append(g[node_name].output(output_ix))
+    parts = name.split(":")
+    if len(parts) == 2:
+      node_name, output_ix_name = name.split(":")
+      output_ix = int(output_ix_name)
+      input_tensors.append(g[node_name].output(output_ix))
+    elif len(parts) == 3:
+      # FuncGraph is using different format for input tensor definitions.
+      # See function_def_to_graph_def function in
+      # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/framework/function_def_to_graph.py
+      node_name, arg_def_name, output_ix_name = name.split(":")
+      if outputs_map is None:
+        raise ValueError("output_map is not specified, can't decode op input")
+      if node_name not in outputs_map:
+        raise ValueError("op {} is not found in output_map".format(node_name))
+      arg_def_names = [name for (_, _, name) in outputs_map[node_name]]
+
+      local_index = int(output_ix_name)
+      global_index = None
+      for i in range(0, len(arg_def_names)):
+        if arg_def_names[i] == arg_def_name:
+          if local_index == 0:
+            global_index = i
+            break
+          else:
+            local_index = local_index-1
+      if global_index is None:
+        raise ValueError("can't find output op corresponding to: {}".format(name))
+      input_tensors.append(g[node_name].output(global_index))
+    else:
+      raise ValueError("invalid input name format: {}".format(name))
   return input_tensors
 
 

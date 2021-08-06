@@ -75,7 +75,8 @@ class SelectTest(unittest.TestCase):
         len(gde.filter_ops(self.graph,
                                         lambda op: op.op_type == "Const")), 3)
     self.assertEqual(
-        len(gde.filter_ops(self.graph, lambda op: op.op_type == "Add")), 5)
+        len(gde.filter_ops(self.graph,
+        lambda op: op.op_type in ["Add", "AddV2"])), 5)
     self.assertEqual(
         len(gde.filter_ops_from_regex(self.graph, r"^.*\b[abc]$")), 3)
 

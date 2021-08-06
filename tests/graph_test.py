@@ -39,6 +39,51 @@ class GraphTest(unittest.TestCase):
     shutil.rmtree(self.temp_dir)
     pass  # In case previous line gets commented out
 
+  def build_graph(self):
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      a = tf.constant(1, name="a")
+      b = tf.constant(2, name="b")
+      c = tf.constant(10, name="c")
+      add_res = tf.add(a, b, name="add")
+      res = tf.multiply(add_res, c, name="mult")
+    g = gde.Graph(g=tf_g)
+    return g
+
+  def build_graph_with_function(self):
+    """Builds a tf graph for function (x + y) * 10.0 ."""
+    @tf.function
+    def multiplier_function(v):
+      return tf.constant(10.0, name="function_multiplier") * v
+
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      x = tf.placeholder(name="x", dtype=tf.float32, shape=[])
+      y = tf.placeholder(name="y", dtype=tf.float32, shape=[])
+      result_op = tf.add(x, y, name="add")
+      func_call_op = multiplier_function(result_op)
+      _ = tf.identity(func_call_op, name="output")
+    return gde.Graph(g=tf_g)
+
+  def build_graph_with_nested_function_call(self):
+    """Builds a tf graph for function (x + y) * 10.0 ."""
+    @tf.function
+    def adder_function(a, b):
+      return a + b
+
+    @tf.function
+    def multiplier_function(a, b):
+      v = adder_function(a, b)
+      return tf.constant(10.0, name="function_multiplier") * v
+
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      x = tf.placeholder(name="x", dtype=tf.float32, shape=[])
+      y = tf.placeholder(name="y", dtype=tf.float32, shape=[])
+      func_call_op = multiplier_function(x, y)
+      _ = tf.identity(func_call_op, name="output")
+    return gde.Graph(g=tf_g)
+
   def test_import_saved_model(self):
     tf_g = tf.Graph()
     with tf_g.as_default():
@@ -232,6 +277,310 @@ class GraphTest(unittest.TestCase):
     t.add_to_collection("mixed_collection")
     with self.assertRaisesRegex(TypeError, "Node collections cannot be Nodes and Tensors.*"):
       g.get_collection_by_name("mixed_collection")
+
+  def test_nodes_iterator(self):
+    g = self.build_graph_with_function()
+    self.assertEqual(
+        {g.get_node_by_name("x"),
+         g.get_node_by_name("y"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("PartitionedCall"),
+         g.get_node_by_name("output")},
+        set(g.nodes_iterator()))
+
+  def test_nodes_iterator_predicate(self):
+    g = self.build_graph_with_function()
+    self.assertEqual(
+        {g.get_node_by_name("x"),
+         g.get_node_by_name("y")},
+        set(g.nodes_iterator(predicate=lambda n: n.op_type == "Placeholder")))
+
+  def test_nodes_iterator_iterate_functions(self):
+    g = self.build_graph_with_function()
+    f = g.get_function_graph_by_name(g.function_names[0])
+    self.assertEqual(
+        {g.get_node_by_name("x"),
+         g.get_node_by_name("y"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("PartitionedCall"),
+         g.get_node_by_name("output"),
+         f.get_node_by_name("function_multiplier"),
+         f.get_node_by_name("mul"),
+         f.get_node_by_name("Identity"),
+         f.get_node_by_name("v")},
+        set(g.nodes_iterator(iterate_functions=True)))
+
+  def test_breadth_first_visitor(self):
+    g = self.build_graph()
+    nodes_in_bfs = []
+    def visit(node):
+      nodes_in_bfs.append(node)
+    def visit_with_break(node):
+      nodes_in_bfs.append(node)
+      return True
+    g.breadth_first_visitor(visit)
+    self.assertEqual(
+        [g.get_node_by_name("a"),
+         g.get_node_by_name("b"),
+         g.get_node_by_name("c"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("mult")],
+        nodes_in_bfs)
+
+    nodes_in_bfs = []
+    g.breadth_first_visitor(visit,
+                            starting_nodes=[g.get_node_by_name("a")])
+    self.assertEqual(
+        [g.get_node_by_name("a"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("mult")],
+        nodes_in_bfs)
+
+    nodes_in_bfs = []
+    g.breadth_first_visitor(visit,
+                            starting_nodes=[g.get_node_by_name("c")])
+    self.assertEqual(
+        [g.get_node_by_name("c"),
+         g.get_node_by_name("mult")],
+        nodes_in_bfs)
+
+    nodes_in_bfs = []
+    g.breadth_first_visitor(visit_with_break,
+                            starting_nodes=[g.get_node_by_name("c")])
+    self.assertEqual(
+        [g.get_node_by_name("c")],
+        nodes_in_bfs)
+
+  def test_breadth_first_visitor_iterate_functions(self):
+    g = self.build_graph_with_function()
+    nodes_in_bfs = []
+    def visit(node):
+      nodes_in_bfs.append(node)
+    g.breadth_first_visitor(
+        visit,
+        starting_nodes=[g.get_node_by_name("x"), g.get_node_by_name("y")])
+    self.assertEqual(
+        [g.get_node_by_name("x"),
+         g.get_node_by_name("y"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("PartitionedCall"),
+         g.get_node_by_name("output")],
+        nodes_in_bfs)
+
+    nodes_in_bfs = []
+    f = g.get_function_graph_by_name(g.function_names[0])
+    g.breadth_first_visitor(
+        visit,
+        starting_nodes=[g.get_node_by_name("x"), g.get_node_by_name("y")],
+        iterate_functions=True)
+    self.assertEqual(
+        [g.get_node_by_name("x"),
+         g.get_node_by_name("y"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("PartitionedCall"),
+         f.get_node_by_name("mul"),
+         f.get_node_by_name("Identity"),
+         g.get_node_by_name("output")],
+        nodes_in_bfs)
+
+  def test_breadth_first_visitor_escape_functions(self):
+    g = self.build_graph_with_function()
+    nodes_in_bfs = []
+    def visit(node):
+      nodes_in_bfs.append(node)
+    f = g.get_function_graph_by_name(g.function_names[0])
+    g.breadth_first_visitor(
+        visit,
+        starting_nodes=[f.get_node_by_name("function_multiplier")])
+    self.assertEqual(
+        [f.get_node_by_name("function_multiplier"),
+         f.get_node_by_name("mul"),
+         f.get_node_by_name("Identity")],
+        nodes_in_bfs)
+
+    nodes_in_bfs = []
+    f = g.get_function_graph_by_name(g.function_names[0])
+    g.breadth_first_visitor(
+        visit,
+        starting_nodes=[f.get_node_by_name("function_multiplier")],
+        escape_functions=True)
+    self.assertEqual(
+        [f.get_node_by_name("function_multiplier"),
+         f.get_node_by_name("mul"),
+         f.get_node_by_name("Identity"),
+         g.get_node_by_name("output")],
+        nodes_in_bfs)
+
+  def test_breadth_first_visitor_escape_nested_functions(self):
+    g = self.build_graph_with_nested_function_call()
+    nodes_in_bfs = []
+    def visit(node):
+      nodes_in_bfs.append(node)
+
+    nodes_in_bfs = []
+    f = g.get_function_graph_by_name(g.function_names[0])
+    g.breadth_first_visitor(
+        visit,
+        starting_nodes=[f.get_node_by_name("function_multiplier")],
+        iterate_functions=True,
+        escape_functions=True)
+    self.assertEqual(
+        [f.get_node_by_name("function_multiplier"),
+         f.get_node_by_name("mul"),
+         f.get_node_by_name("Identity"),
+         g.get_node_by_name("output")],
+        nodes_in_bfs)
+
+  def test_breadth_first_visitor_escape_nested_functions(self):
+    g = self.build_graph_with_nested_function_call()
+    nodes_in_bfs = []
+    def visit(node):
+      nodes_in_bfs.append(node)
+
+    add_node = list(g.nodes_iterator(lambda n:n.name=='add', iterate_functions=True))[0]
+    multiplier_function_name = g.get_node_by_name("x").outputs[0].consumers()[0].get_attr('f').name
+    multiplier_function_graph = g.get_function_graph_by_name(multiplier_function_name)
+    adder_function_graph = add_node.graph
+    nodes_in_bfs = []
+    g.breadth_first_visitor(
+        visit,
+        starting_nodes=[add_node],
+        iterate_functions=True,
+        escape_functions=True)
+    self.assertEqual(
+        [add_node,
+         add_node.graph.get_node_by_name("Identity"),
+         multiplier_function_graph.get_node_by_name("mul"),
+         multiplier_function_graph.get_node_by_name("Identity"),
+         g.get_node_by_name("output")],
+        nodes_in_bfs)
+
+  def test_backwards_breadth_first_visitor(self):
+    g = self.build_graph()
+    nodes_in_backwards_bfs = []
+    def visit(node):
+      nodes_in_backwards_bfs.append(node)
+    def visit_with_break(node):
+      nodes_in_backwards_bfs.append(node)
+      return True
+    g.backwards_breadth_first_visitor(
+        visit,
+        starting_nodes=[g.get_node_by_name("mult")])
+    self.assertEqual(
+        [g.get_node_by_name("mult"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("c"),
+         g.get_node_by_name("a"),
+         g.get_node_by_name("b")],
+        nodes_in_backwards_bfs)
+
+    nodes_in_backwards_bfs = []
+    g.backwards_breadth_first_visitor(
+        visit,
+        starting_nodes=[g.get_node_by_name("add")])
+    self.assertEqual(
+        [g.get_node_by_name("add"),
+         g.get_node_by_name("a"),
+         g.get_node_by_name("b")],
+        nodes_in_backwards_bfs)
+
+    nodes_in_backwards_bfs = []
+    g.backwards_breadth_first_visitor(
+        visit_with_break,
+        starting_nodes=[g.get_node_by_name("add")])
+    self.assertEqual(
+        [g.get_node_by_name("add")],
+        nodes_in_backwards_bfs)
+
+  def test_backwards_breadth_first_visitor_iterate_functions(self):
+    g = self.build_graph_with_function()
+    nodes_in_backwards_bfs = []
+    def visit(node):
+      nodes_in_backwards_bfs.append(node)
+    g.backwards_breadth_first_visitor(
+        visit,
+        starting_nodes=[g.get_node_by_name("output")])
+    self.assertEqual(
+        [g.get_node_by_name("output"),
+         g.get_node_by_name("PartitionedCall"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("x"),
+         g.get_node_by_name("y")],
+        nodes_in_backwards_bfs)
+
+    nodes_in_backwards_bfs = []
+    f = g.get_function_graph_by_name(g.function_names[0])
+    g.backwards_breadth_first_visitor(
+        visit,
+        starting_nodes=[g.get_node_by_name("output")],
+        iterate_functions=True)
+    self.assertEqual(
+        [g.get_node_by_name("output"),
+         g.get_node_by_name("PartitionedCall"),
+         f.get_node_by_name("Identity"),
+         f.get_node_by_name("mul"),
+         f.get_node_by_name("function_multiplier"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("x"),
+         g.get_node_by_name("y")],
+        nodes_in_backwards_bfs)
+
+  def test_backwards_breadth_first_visitor_escape_functions(self):
+    g = self.build_graph_with_function()
+    nodes_in_backwards_bfs = []
+    def visit(node):
+      nodes_in_backwards_bfs.append(node)
+    f = g.get_function_graph_by_name(g.function_names[0])
+    g.backwards_breadth_first_visitor(
+        visit,
+        starting_nodes=[f.get_node_by_name("Identity")])
+    self.assertEqual(
+        [f.get_node_by_name("Identity"),
+         f.get_node_by_name("mul"),
+         f.get_node_by_name("function_multiplier")],
+        nodes_in_backwards_bfs)
+
+    nodes_in_backwards_bfs = []
+    f = g.get_function_graph_by_name(g.function_names[0])
+    g.backwards_breadth_first_visitor(
+        visit,
+        starting_nodes=[f.get_node_by_name("Identity")],
+        escape_functions=True)
+    self.assertEqual(
+        [f.get_node_by_name("Identity"),
+         f.get_node_by_name("mul"),
+         f.get_node_by_name("function_multiplier"),
+         g.get_node_by_name("PartitionedCall"),
+         g.get_node_by_name("add"),
+         g.get_node_by_name("x"),
+         g.get_node_by_name("y")],
+        nodes_in_backwards_bfs)
+
+  def test_backwards_breadth_first_visitor_escape_nested_functions(self):
+    g = self.build_graph_with_nested_function_call()
+    nodes_in_backwards_bfs = []
+    def visit(node):
+      nodes_in_backwards_bfs.append(node)
+
+    add_node = list(g.nodes_iterator(lambda n:n.name=='add', iterate_functions=True))[0]
+    multiplier_function_name = g.get_node_by_name("x").outputs[0].consumers()[0].get_attr('f').name
+    multiplier_function_graph = g.get_function_graph_by_name(multiplier_function_name)
+
+    adder_call_op = list(g.nodes_iterator(lambda n:n.op_type=='PartitionedCall' and n.get_attr('f').name == add_node.graph.name, iterate_functions=True))[0]
+    multiplier_call_op = list(g.nodes_iterator(lambda n:n.op_type=='PartitionedCall' and n.get_attr('f').name != add_node.graph.name, iterate_functions=True))[0]
+
+    g.backwards_breadth_first_visitor(
+        visit,
+        starting_nodes=[add_node],
+        iterate_functions=True,
+        escape_functions=True)
+    self.assertEqual(
+        [add_node,
+         adder_call_op,
+         multiplier_call_op,
+         g.get_node_by_name("x"),
+         g.get_node_by_name("y")],
+         nodes_in_backwards_bfs)
 
 
 if __name__ == "__main__":
