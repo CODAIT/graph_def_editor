@@ -47,12 +47,7 @@ _INPUT_DUMMY_OP_NAME = "__input__"
 
 
 class FunctionGraph(base_graph.BaseGraph):
-  """Wrapper class for TensorFlow function graphs.
-
-  Summary of internal data structures:
-  * _node_name_to_node: Nodes in the graph, stored as a dictionary. Key is name.
-  * _version: Counter that increments every time the graph is modified
-  """
+  """Wrapper class for TensorFlow function graphs."""
 
   def __init__(
       self,
@@ -78,7 +73,6 @@ class FunctionGraph(base_graph.BaseGraph):
           [(dtype, shape) for (dtype, shape, _) in tuples]
 
     # Populate fields of object
-    self._node_name_to_node = {}  # Dict[str, node.Node]; key is node name
     self._node_to_frame_names = None
     self._frame_name_to_nodes = None
     self._head_name_to_coloc_group = None  # Dict[str, FrozenList[str]]

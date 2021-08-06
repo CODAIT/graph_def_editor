@@ -53,7 +53,9 @@ class BaseGraph(object):
           name = None, # type: str
           ):
     """
-    Wrap a tf.GraphDef protocol buffer in a Graph object.
+    Constructor to be called by subclasses only.
+
+    Initializes attributes of this base class.
 
     Args:
       name: Optional human-readable name for the graph. If not provided,
@@ -137,6 +139,8 @@ class BaseGraph(object):
       uniquify_name: Generate a unique name from this name if the graph
         already has a node with the indicated name. If False, raise an
         exception if the name is in use.
+      debug_info: Some internal TensorFlow debug information.
+        We just pass it through for safety.
 
     Returns:
       `MutableNode` wrapper for the new node.
@@ -265,6 +269,7 @@ class BaseGraph(object):
     v = variable.Variable(self)
     v.name = name
     self._variable_name_to_variable[name] = v
+    self.increment_version_counter()
     return v
 
   def add_variable_from_variable_def(self, variable_def,

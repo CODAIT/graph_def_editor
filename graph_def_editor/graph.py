@@ -311,10 +311,11 @@ class Graph(base_graph.BaseGraph):
     for op in self.nodes:
       op.to_node_def(ret.node.add(), add_shapes)
 
-    # Pass through library without modifications for now.
+    # Copy library as is.
     if self._graph_def and self._graph_def.library:
       ret.library.CopyFrom(self._graph_def.library)
 
+    # Update functions in library that were instantiated as function graphs.
     for f_name, f_graph in self._function_graphs.items():
       function_index_to_update = None
       for index in range(0, len(ret.library.function)):
@@ -716,6 +717,9 @@ class Graph(base_graph.BaseGraph):
     """
     Visit all nodes reachable from a starting set in the order of a
     breadth-first traversal (going from node to output edges).
+    If visitor gets to a function call, and iterate_functions is True,
+    it will iterate all function nodes first and then continue with
+    remaining nodes in the graph.
     Invokes a callback at each node visited.
 
     Args:
@@ -731,7 +735,7 @@ class Graph(base_graph.BaseGraph):
           that we should also iterate through all function callers up
           the stack.
     Returns:
-      True if iteration was iterruputed by visitor, otherwise False.
+      True if iteration was interrupted by visitor, otherwise False.
     """
     if starting_nodes is None:
       # Start with all of the nodes in the graph that have no inputs.
@@ -818,6 +822,9 @@ class Graph(base_graph.BaseGraph):
     """
     Visit all nodes reachable from a starting set in the order of a
     backwards breadth-first traversal (going from node to input edges).
+    If visitor gets to a function call, and iterate_functions is True,
+    it will iterate all function nodes first and then continue with
+    remaining nodes in the graph.
     Invokes a callback at each node visited.
 
     Args:
@@ -830,7 +837,7 @@ class Graph(base_graph.BaseGraph):
           that we should also iterate through all function callers up
           the stack.
     Returns:
-      True if iteration was iterruputed by visitor, otherwise False.
+      True if iteration was interrupted by visitor, otherwise False.
     """
     if not starting_nodes:
       raise ValueError("starting_nodes is not provided")

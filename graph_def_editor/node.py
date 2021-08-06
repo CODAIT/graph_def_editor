@@ -23,7 +23,7 @@ import sys
 if sys.version >= '3':
   from typing import Tuple, List, Iterable, Any, AbstractSet, Type
 
-from graph_def_editor import tensor, util
+from graph_def_editor import base_graph, tensor, util
 
 # Magical attribute name that TensorFlow uses to store colocation groups.
 # See colocation_groups property below for more information.
@@ -87,7 +87,7 @@ class Node(object):
       device: TensorFlow device specification string indicating where this node
         should be located. Default value of "" means "use the default device"
     """
-    _type_check(g, graph.Graph, "g")
+    _type_check(g, base_graph.BaseGraph, "g")
     _type_check(node_id, int, "node_id")
     _type_check(name, str, "name")
     _type_check(op_name, str, "op_name")
