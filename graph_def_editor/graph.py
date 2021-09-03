@@ -29,7 +29,8 @@ if sys.version >= '3':
   from typing import Tuple, Dict, FrozenSet, Iterable, Union, Set, Any
 import queue
 
-from graph_def_editor import base_graph, function_graph, node, util, tensor, variable
+from graph_def_editor import base_graph, function_graph, node, util, tensor, variable, subgraph
+import graph_def_editor.visualization.graphviz_wrapper as gvw
 
 # TODO: Move this protobuf into this project so we don't depend on
 #  tf.core.framework
@@ -292,7 +293,8 @@ class Graph(base_graph.BaseGraph):
     if function_name not in self._function_graphs:
       self._function_graphs[function_name] = function_graph.FunctionGraph(
           name=function_name,
-          parent_graph=self._graph)
+          parent_tf_graph=self._graph,
+          parent_graph=self)
 
     return self._function_graphs[function_name]
 
@@ -364,11 +366,12 @@ class Graph(base_graph.BaseGraph):
     if tf.gfile.Exists(saved_model_path):
       raise ValueError("Output path '{}' already exists".format(
         saved_model_path))
+    saved_model_path = saved_model_path.rstrip("/")
     if not tf.gfile.Exists(os.path.dirname(saved_model_path)):
       raise ValueError("Parent directory '{}' of output dir '{}' does not "
                        "exist".format(os.path.dirname(saved_model_path),
                                       saved_model_path))
-    tf.gfile.MkDir(saved_model_path)
+    tf.gfile.MakeDirs(saved_model_path)
 
     # Core part of the SavedModel is a protocol buffers file containing a
     # SavedModel protocol buffer message.
@@ -711,7 +714,8 @@ class Graph(base_graph.BaseGraph):
       starting_nodes=None,  # type: Iterable[node.Node]
       visited_nodes=None,  # type: set
       iterate_functions=False,  # type: bool
-      escape_functions=False  # type: bool
+      escape_functions=False,  # type: bool
+      max_depth=None  # type: int
   ):
     # type: (...) -> None
     """
@@ -734,6 +738,8 @@ class Graph(base_graph.BaseGraph):
       escape_functions: If iteration started in a function graph, indicates
           that we should also iterate through all function callers up
           the stack.
+      max_depth: Maximum depth to iterate up to. If None, iteration will
+          continue until boundary of the graph is reached.
     Returns:
       True if iteration was interrupted by visitor, otherwise False.
     """
@@ -751,11 +757,11 @@ class Graph(base_graph.BaseGraph):
 
     starting_nodes_set = set()
     for n in starting_nodes:
-      nodes_queue.put((n, None))
+      nodes_queue.put((n, None, max_depth))
       starting_nodes_set.add(n)
 
     while not nodes_queue.empty():
-      (n, input_tensor) = nodes_queue.get()
+      (n, input_tensor, depth) = nodes_queue.get()
       if n in visited_nodes:
         continue
       if n.op_type != _INPUT_DUMMY_OP_NAME:
@@ -784,14 +790,19 @@ class Graph(base_graph.BaseGraph):
             starting_nodes=function_inputs,
             visited_nodes=visited_nodes,
             iterate_functions=iterate_functions,
-            escape_functions=False):
+            escape_functions=False,
+            max_depth=depth-1 if depth is not None else None):
           return True
 
       for output_tensor in n.outputs:
         for consumer in output_tensor.consumers():
           if consumer not in visited_nodes and \
               consumer not in starting_nodes_set:
-            nodes_queue.put((consumer, output_tensor))
+            if depth is not None and depth <= 0:
+              return True
+            nodes_queue.put((consumer,
+                             output_tensor,
+                             depth-1 if depth is not None else None))
 
     if escape_functions and function_graph_names_set:
       function_invocation_ops = self.nodes_iterator(
@@ -807,7 +818,8 @@ class Graph(base_graph.BaseGraph):
             starting_nodes=function_output_consumers,
             visited_nodes=visited_nodes,
             iterate_functions=iterate_functions,
-            escape_functions=True):
+            escape_functions=True,
+            max_depth=depth-1 if depth is not None else None):
           return True
     return False
 
@@ -817,7 +829,8 @@ class Graph(base_graph.BaseGraph):
       starting_nodes=None,  # type: Iterable[node.Node]
       visited_nodes=None,  # type: set
       iterate_functions=False,  # type: bool
-      escape_functions=False  # type: bool
+      escape_functions=False,  # type: bool
+      max_depth=None
       ):  # type: (...) -> None
     """
     Visit all nodes reachable from a starting set in the order of a
@@ -836,6 +849,8 @@ class Graph(base_graph.BaseGraph):
       escape_functions: If iteration started in a function graph, indicates
           that we should also iterate through all function callers up
           the stack.
+      max_depth: Maximum depth to iterate up to. If None, iteration will
+          continue until boundary of the graph is reached.
     Returns:
       True if iteration was interrupted by visitor, otherwise False.
     """
@@ -851,10 +866,10 @@ class Graph(base_graph.BaseGraph):
     starting_nodes_set = set()
     for n in starting_nodes:
       starting_nodes_set.add(n)
-      nodes_queue.put(n)
+      nodes_queue.put((n, max_depth))
 
     while not nodes_queue.empty():
-      n = nodes_queue.get()
+      (n, depth) = nodes_queue.get()
 
       if n in visited_nodes:
         continue
@@ -876,14 +891,17 @@ class Graph(base_graph.BaseGraph):
             starting_nodes=f_graph.output_nodes,
             visited_nodes=visited_nodes,
             iterate_functions=iterate_functions,
-            escape_functions=False):
+            escape_functions=False,
+            max_depth=depth-1 if depth is not None else None):
           return True
 
       visited_nodes.add(n)
       for input_tensor in n.inputs:
         if (input_tensor.op not in visited_nodes and
             input_tensor.op not in starting_nodes_set):
-          nodes_queue.put(input_tensor.op)
+          if depth is not None and depth <= 0:
+            return True
+          nodes_queue.put((input_tensor.op, depth-1 if depth is not None else None))
 
     if escape_functions and function_graph_names_set:
       function_invocation_ops = self.nodes_iterator(
@@ -899,7 +917,8 @@ class Graph(base_graph.BaseGraph):
             starting_nodes=caller_ops,
             visited_nodes=visited_nodes,
             iterate_functions=iterate_functions,
-            escape_functions=True):
+            escape_functions=True,
+            max_depth=depth-1 if depth is not None else None):
           return True
 
     return False
@@ -1006,11 +1025,83 @@ class Graph(base_graph.BaseGraph):
     """
     return self._signatures.signature_defs
 
+  def _visualize_node(
+      self,
+      gde_node,
+      format=None,
+      depth=1,
+      style=True,
+      name_regex="",
+      negative_name_regex="",
+      add_digraph_func=None,
+      add_digraph_node_func=None,
+      add_digraph_edge_func=None,
+      depth_before=1,
+      depth_after=2):
+    """Return GraphViz Digraph rendering of the current and adjacent nodes.
+
+    Args:
+      gde_node: a node to visualize.
+      format: GraphViz display format. In addition to that it supports
+        jupyter_svg, and jupyter_interactive modes.
+      depth: the maximum depth of the graph to display.
+      style: whether to apply default styles.
+      name_regex: only diplay nodes that have name matching this regex.
+      negative_name_regex: only diplay nodes that have name not matching this
+        regex.
+      add_digraph_func: custom override for function for adding subraphs
+        to the resulting Digraph object.
+      add_digraph_node_func: custom override for function for adding nodes
+        (vertices) to the resulting Digraph object.
+      add_digraph_edge_func: custom override for function for adding edges
+        to the resulting Digraph object.
+      depth_before: number of adjacent nodes to show before the current one.
+      depth_after: number of adjacent nodes to show after the current one.
+
+    Returns:
+      graphviz.dot.Digraph object with visual representtion for the current
+        graph.
+    """
+
+    adjacent_nodes = set()
+    adjacent_nodes.add(gde_node)
+    self.backwards_breadth_first_visitor(
+        adjacent_nodes.add,
+        max_depth=depth_before,
+        starting_nodes=[gde_node])
+    self.breadth_first_visitor(
+        adjacent_nodes.add,
+        max_depth=depth_after,
+        starting_nodes=[gde_node])
+
+    sg = subgraph.SubGraphView(adjacent_nodes)
+
+    def custom_add_digraph_node(digraph, name, op, attributes=None):
+      attributes = []
+      if op == gde_node:
+        attributes.append(("fillcolor", "yellow"))
+      gvw.add_digraph_node(digraph, name, op, attributes)
+
+    if not add_digraph_node_func:
+      add_digraph_node_func = custom_add_digraph_node
+
+    return sg.visualize(
+        format=format,
+        depth=depth,
+        name=gde_node.name,
+        style=style,
+        name_regex=name_regex,
+        negative_name_regex=negative_name_regex,
+        add_digraph_func=add_digraph_func,
+        add_digraph_node_func=add_digraph_node_func,
+        add_digraph_edge_func=add_digraph_edge_func)
+
 
 def saved_model_to_graph(saved_model_path, # type: str
-                         tag = None, # type: str
+                         tag = None, # type: Union[str, List[str]]
                          include_saver = True, # type: bool
-                         include_signatures = True # type: bool
+                         include_signatures = True, # type: bool
+                         fallback_to_default_graph = False, # type: bool
                          ):
   # type: (...) -> Graph
   """
@@ -1018,7 +1109,7 @@ def saved_model_to_graph(saved_model_path, # type: str
 
   Args:
     saved_model_path: Path to the SavedModel's directory on disk
-    tag: User-specified tag attached to the MetaGraphDef that should be
+    tag: User-specified tags attached to the MetaGraphDef that should be
       loaded from the SavedModel. If None, verify that there is only one
       MetaGraphDef in the model and load that one.
     include_saver: If True, attach black-box information about the SavedModel's
@@ -1028,16 +1119,19 @@ def saved_model_to_graph(saved_model_path, # type: str
     include_signatures: If True, attach signature information from the
       SavedModel to the returned Graph object. Otherwise the returned graph
       will have no signatures.
+    fallback_to_default_graph: If True, fallback to saved_model.meta_graphs[0]
+      if specified tag is not found, and saved_model.meta_graphs[0] is the
+      only graph available.
 
   Returns: In-memory representation of the contents of the SavedModel as a
   Graph object.
   """
   if not tf.gfile.Exists(saved_model_path):
-    raise ValueError("SavedModel root directory {} not found".format(
-      saved_model_path))
+    raise ValueError(
+        "SavedModel root directory {} not found".format(saved_model_path))
   if not tf.gfile.IsDirectory(saved_model_path):
-    raise ValueError("SavedModel root path {} is not a directory".format(
-      saved_model_path))
+    raise ValueError(
+        "SavedModel root path {} is not a directory".format(saved_model_path))
 
   # By convention, the main protobuf for the SavedModel is in a file called
   # "saved_model.pb"
@@ -1054,13 +1148,25 @@ def saved_model_to_graph(saved_model_path, # type: str
                        "tag to select a specific MetaGraphDef")
     meta_graph = saved_model.meta_graphs[0]
   else:
+    tags = set(tag) if isinstance(tag, list) else set([tag])
     matching_ixs = [
-      i for i in range(len(saved_model.meta_graphs))
-      if tag in saved_model.meta_graphs[i].meta_info_def.tags
+        i for i in range(len(saved_model.meta_graphs))
+        if tags == set(saved_model.meta_graphs[i].meta_info_def.tags)
     ]
-    if len(matching_ixs) == 0:
-      raise ValueError("No MetaGraphDef in SavedModel at {} contains tag "
-                       "'{}'".format(saved_model_path, tag))
+    if len(matching_ixs) != 1:
+      print(f"WARNING: exact match for tags {tags} is not found")
+      matching_ixs = [
+          i for i in range(len(saved_model.meta_graphs))
+          if tags.issubset(set(saved_model.meta_graphs[i].meta_info_def.tags))
+      ]
+    if not matching_ixs:
+      if fallback_to_default_graph and len(saved_model.meta_graphs) == 1:
+        print(
+            f"WARNING: specified tags {tags} are not found, using default one")
+        meta_graph = saved_model.meta_graphs[0]
+      else:
+        raise ValueError("No MetaGraphDef in SavedModel at {} contains tag "
+                         "'{}'".format(saved_model_path, tag))
     if len(matching_ixs) > 1:
       raise ValueError("{} different MetaGraphDef in SavedModel at {} "
                        "contain tag '{}'. Please specify a tag that "

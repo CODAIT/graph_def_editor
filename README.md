@@ -1,4 +1,5 @@
 # GraphDef Editor
+
 ### A port of the TensorFlow `contrib.graph_editor` package that operates over serialized graphs
 
 TensorFlow versions prior to version 2.0 had a Python graph editor in
@@ -22,6 +23,7 @@ classes that the original graph editor depended on. TensorFlow's C++
 also operates over serialized graphs.
 
 Example usage:
+
 ```python
 import numpy as np
 import tensorflow as tf
@@ -126,14 +128,15 @@ $ pip install ./graph_def_editor
    `test.out` at the root of the project.
 
 
-## TensorFlow version compatibility
+## TensorFlow versions compatibility
 
 GraphDef Editor is fully supported for TensorFlow versions 1.14.x and 1.15.x.
 For TensorFlow 2.x some transforms might not work.
 
-To execute tests for specific TensorFlow versions run the following command from the repository root:
+To execute tests for specific TensorFlow version run the following command from the repository root:
 ```sh
-docker run -v ${PWD}:/v -w /v tensorflow/tensorflow:<version>[-py3] bash -c "pip3 install -U pytest && pytest"
+docker run -v ${PWD}:/v -w /v tensorflow/tensorflow:<version>[-py3] \
+  bash -c "apt-get update && apt-get install graphviz -y && pip3 install -U pytest graphviz ipython && pytest"
 ```
 
 Pre 2.2.0 TensorFlow versions have -py3 suffix indicating that Python3 should be used.
