@@ -168,8 +168,8 @@ def node_input_table(gde_graph, depth=1, match_func=None):
     opn = '/'.join(op_name)
     if not opn in inpt_op_table:
       inpt_op_table[opn] = []
-    inpt_op_list = ['/'.join(input_tensor.name.split('/')[0:depth]) \
-        for input_tensor in op.inputs if not match_func or match_func(input_tensor.name)]
+    inpt_op_list = ['/'.join(input_tensor.op.name.split('/')[0:depth]) \
+        for input_tensor in op.inputs if not match_func or match_func(input_tensor.op.name)]
     inpt_op_table[opn].append(inpt_op_list)
     for output in op.outputs:
       for i in range(depth):
