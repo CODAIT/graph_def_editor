@@ -133,10 +133,10 @@ $ pip install ./graph_def_editor
 GraphDef Editor is fully supported for TensorFlow versions 1.14.x and 1.15.x.
 For TensorFlow 2.x some transforms might not work.
 
-To execute tests for specific TensorFlow version run the following command from the repository root:
+To execute tests for a specific TensorFlow version run the following command from the repository root:
 ```sh
 docker run -v ${PWD}:/v -w /v tensorflow/tensorflow:<version>[-py3] \
-  bash -c "apt-get update && apt-get install graphviz -y && pip3 install -U pytest graphviz ipython && pytest"
+  bash -c "pip3 install -U pytest && pytest"
 ```
 
 Pre 2.2.0 TensorFlow versions have -py3 suffix indicating that Python3 should be used.

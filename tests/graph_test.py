@@ -598,6 +598,11 @@ class GraphTest(unittest.TestCase):
          nodes_in_backwards_bfs)
 
   def test_visialize(self):
+    try:
+      import graphviz
+    except ModuleNotFoundError as error:
+      print("WARNING: graphviz is not installed, skipping test")
+      return
     g = self.build_graph_with_nested_function_call()
     gv_graph = gde.util.parse_graphviz_json(g.visualize(format="json").decode())
 
@@ -610,6 +615,11 @@ class GraphTest(unittest.TestCase):
     self.assertEqual(expected_gv_graph, gv_graph)
 
   def test_node_visialize(self):
+    try:
+      import graphviz
+    except ModuleNotFoundError as error:
+      print("WARNING: graphviz is not installed, skipping test")
+      return
     g = self.build_graph_with_nested_function_call()
     gv_graph = gde.util.parse_graphviz_json(
         g.get_node_by_name("PartitionedCall").visualize(format="json").decode())

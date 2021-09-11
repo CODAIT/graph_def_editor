@@ -148,6 +148,11 @@ class FunctionGraphTest(unittest.TestCase):
       self.assertEqual(4, sess.run(output_tensor, {c: [2, 1, 5]}))
 
   def test_visialize(self):
+    try:
+      import graphviz
+    except ModuleNotFoundError as error:
+      print("WARNING: graphviz is not installed, skipping test")
+      return
     tf_g = self.build_tf_graph()
     graph = gde.Graph(tf_g)
     function_graph = graph.get_function_graph_by_name(graph.function_names[0])
