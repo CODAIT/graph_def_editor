@@ -29,6 +29,7 @@ if sys.version >= '3':
   from typing import Tuple, Dict, FrozenSet, Iterable, Union, Set, Any
 
 from graph_def_editor import node, util, tensor, variable
+import graph_def_editor.visualization.graphviz_wrapper as gvw
 
 
 __all__ = [
@@ -467,6 +468,49 @@ class BaseGraph(object):
     if self.frozen:
       raise RuntimeError("Detected a change to a frozen graph")
     self._version += 1
+
+  def visualize(
+      self,
+      format=None,
+      depth=1,
+      style=True,
+      name_regex="",
+      negative_name_regex="",
+      add_digraph_func=None,
+      add_digraph_node_func=None,
+      add_digraph_edge_func=None):
+    """Return GraphViz Digraph rendering of the current graph.
+
+    Args:
+      format: GraphViz display format. In addition to that it supports
+        jupyter_svg, and jupyter_interactive modes.
+      depth: the maximum depth of the graph to display.
+      style: whether to apply default styles.
+      name_regex: only diplay nodes that have name matching this regex.
+      negative_name_regex: only diplay nodes that have name not matching this
+        regex.
+      add_digraph_func: custom override for function for adding subraphs
+        to the resulting Digraph object.
+      add_digraph_node_func: custom override for function for adding nodes
+        (vertices) to the resulting Digraph object.
+      add_digraph_edge_func: custom override for function for adding edges
+        to the resulting Digraph object.
+
+    Returns:
+      graphviz.dot.Digraph object with visual representtion for the current
+        graph.
+    """
+    return gvw.visualize(
+        self,
+        format=format,
+        depth=depth,
+        name=self.name,
+        style=style,
+        name_regex=name_regex,
+        negative_name_regex=negative_name_regex,
+        add_digraph_func=add_digraph_func,
+        add_digraph_node_func=add_digraph_node_func,
+        add_digraph_edge_func=add_digraph_edge_func)
 
   def _get_next_id(self):
     # type: () -> int

@@ -25,8 +25,8 @@ import six
 from six import iteritems
 from six import StringIO
 
-from graph_def_editor import select, util
-from graph_def_editor import graph as gde_graph
+from graph_def_editor import base_graph, select, util
+import graph_def_editor.visualization.graphviz_wrapper as gvw
 
 __all__ = [
     "SubGraphView",
@@ -490,6 +490,11 @@ class SubGraphView(object):
     return self._ops
 
   @property
+  def nodes(self):
+    """The operations in this subgraph view (for consistency with Graph)."""
+    return self._ops
+
+  @property
   def inputs(self):
     """The input tensors of this subgraph view."""
     return util.ListView(self._input_ts)
@@ -599,6 +604,51 @@ class SubGraphView(object):
       util.concatenate_unique(res, consumers)
     return res
 
+  def visualize(
+      self,
+      name="SubGraph",
+      format=None,
+      depth=1,
+      style=True,
+      name_regex="",
+      negative_name_regex="",
+      add_digraph_func=None,
+      add_digraph_node_func=None,
+      add_digraph_edge_func=None):
+    """Return GraphViz Digraph rendering of the current graph.
+
+    Args:
+      name: SubGraph name.
+      format: GraphViz display format. In addition to that it supports
+        jupyter_svg, and jupyter_interactive modes.
+      depth: the maximum depth of the graph to display.
+      style: whether to apply default styles.
+      name_regex: only diplay nodes that have name matching this regex.
+      negative_name_regex: only diplay nodes that have name not matching this
+        regex.
+      add_digraph_func: custom override for function for adding subraphs
+        to the resulting Digraph object.
+      add_digraph_node_func: custom override for function for adding nodes
+        (vertices) to the resulting Digraph object.
+      add_digraph_edge_func: custom override for function for adding edges
+        to the resulting Digraph object.
+
+    Returns:
+      graphviz.dot.Digraph object with visual representtion for the current
+        graph.
+    """
+    return gvw.visualize(
+        self,
+        format=format,
+        depth=depth,
+        name=name,
+        style=style,
+        name_regex=name_regex,
+        negative_name_regex=negative_name_regex,
+        add_digraph_func=add_digraph_func,
+        add_digraph_node_func=add_digraph_node_func,
+        add_digraph_edge_func=add_digraph_edge_func)
+
 
 def _check_graph(sgv, graph):
   """Check if sgv belongs to the given graph.
@@ -618,8 +668,8 @@ def _check_graph(sgv, graph):
     raise TypeError("Expected a SubGraphView, got: {}".format(type(graph)))
   if graph is None or not sgv.graph:
     return sgv
-  if not isinstance(graph, gde_graph.Graph):
-    raise TypeError("Expected a gde.Graph, got: {}".format(type(graph)))
+  if not isinstance(graph, base_graph.BaseGraph):
+    raise TypeError("Expected a base_graph.BaseGraph, got: {}".format(type(graph)))
   if sgv.graph is not graph:
     raise ValueError("Graph mismatch.")
   return sgv

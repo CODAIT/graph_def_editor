@@ -765,6 +765,59 @@ class Node(object):
     """
     self._collection_names = set()
 
+  def visualize(
+      self,
+      format=None,
+      depth=None,
+      style=True,
+      name_regex="",
+      negative_name_regex="",
+      add_digraph_func=None,
+      add_digraph_node_func=None,
+      add_digraph_edge_func=None,
+      depth_before=1,
+      depth_after=2):
+    """Return GraphViz Digraph rendering of the current and adjacent nodes.
+
+    Args:
+      format: GraphViz display format. In addition to that it supports
+        jupyter_svg, and jupyter_interactive modes.
+      depth: the maximum depth of the graph to display.
+      style: whether to apply default styles.
+      name_regex: only diplay nodes that have name matching this regex.
+      negative_name_regex: only diplay nodes that have name not matching this
+        regex.
+      add_digraph_func: custom override for function for adding subraphs
+        to the resulting Digraph object.
+      add_digraph_node_func: custom override for function for adding nodes
+        (vertices) to the resulting Digraph object.
+      add_digraph_edge_func: custom override for function for adding edges
+        to the resulting Digraph object.
+      depth_before: number of adjacent nodes to show before the current one.
+      depth_after: number of adjacent nodes to show after the current one.
+
+    Returns:
+      graphviz.dot.Digraph object with visual representtion for the current
+        graph.
+    """
+
+    if depth is None:
+      depth = len(self.name.split("/"))
+
+    # pylint: disable=protected-access
+    return self.graph._visualize_node(
+        gde_node=self,
+        format=format,
+        depth=depth,
+        style=style,
+        name_regex=name_regex,
+        negative_name_regex=negative_name_regex,
+        add_digraph_func=add_digraph_func,
+        add_digraph_node_func=add_digraph_node_func,
+        add_digraph_edge_func=add_digraph_edge_func,
+        depth_before=depth_before,
+        depth_after=depth_after)
+
 
 ################################################################################
 # Stuff below this line is private to this file.

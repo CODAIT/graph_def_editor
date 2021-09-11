@@ -52,7 +52,8 @@ class FunctionGraph(base_graph.BaseGraph):
   def __init__(
       self,
       name=None,  # type: str
-      parent_graph=None  # type: tf.Graph
+      parent_tf_graph=None,  # type: tf.Graph
+      parent_graph=None  # type: gde.Graph
   ):
     """Wrap a tf.GraphDef protocol buffer in a FunctionGraph object.
 
@@ -65,7 +66,7 @@ class FunctionGraph(base_graph.BaseGraph):
     """
     super(FunctionGraph, self).__init__(name)
     (self._func_graph, self._func_graph_def) = \
-        _get_func_graph_for_name(parent_graph, name)
+        _get_func_graph_for_name(parent_tf_graph, name)
     output_map = _decode_graph(name, self._func_graph)
     output_map_pairs = {}
     for op_name, tuples in output_map.items():
@@ -80,6 +81,7 @@ class FunctionGraph(base_graph.BaseGraph):
     self._collection_name_to_type = None  # Dict[str, str], generated on demand
     self._input_nodes = []
     self._output_nodes = []
+    self._parent_graph = parent_graph
 
     for input_arg in self._func_graph_def.signature.input_arg:
       self._input_nodes.append(
@@ -113,6 +115,10 @@ class FunctionGraph(base_graph.BaseGraph):
   @property
   def output_nodes(self):
     return self._output_nodes
+
+  @property
+  def parent_graph(self):
+    return self._parent_graph
 
   def get_func_graph_for_name(self, graph, func_name):
     """Returns the FuncGraph associated to the given func_name if possible."""
@@ -262,6 +268,59 @@ class FunctionGraph(base_graph.BaseGraph):
         output_args.append(output_arg)
 
     return (output_args, input_op_output_has_number_attr)
+
+  def _visualize_node(
+      self,
+      gde_node,
+      format=None,
+      depth=1,
+      style=True,
+      name_regex="",
+      negative_name_regex="",
+      add_digraph_func=None,
+      add_digraph_node_func=None,
+      add_digraph_edge_func=None,
+      depth_before=1,
+      depth_after=2):
+    """Return GraphViz Digraph rendering of the current and adjacent nodes.
+
+    Args:
+      gde_node: a node to visualize.
+      format: GraphViz display format. In addition to that it supports
+        jupyter_svg, and jupyter_interactive modes.
+      depth: the maximum depth of the graph to display.
+      style: whether to apply default styles.
+      name_regex: only diplay nodes that have name matching this regex.
+      negative_name_regex: only diplay nodes that have name not matching this
+        regex.
+      add_digraph_func: custom override for function for adding subraphs
+        to the resulting Digraph object.
+      add_digraph_node_func: custom override for function for adding nodes
+        (vertices) to the resulting Digraph object.
+      add_digraph_edge_func: custom override for function for adding edges
+        to the resulting Digraph object.
+      depth_before: number of adjacent nodes to show before the current one.
+      depth_after: number of adjacent nodes to show after the current one.
+
+    Returns:
+      graphviz.dot.Digraph object with visual representtion for the current
+        graph.
+    """
+
+    # pylint: disable=protected-access
+    return self._parent_graph._visualize_node(
+        gde_node=gde_node,
+        format=format,
+        depth=depth,
+        style=style,
+        name_regex=name_regex,
+        negative_name_regex=negative_name_regex,
+        add_digraph_func=add_digraph_func,
+        add_digraph_node_func=add_digraph_node_func,
+        add_digraph_edge_func=add_digraph_edge_func,
+        depth_before=depth_before,
+        depth_after=depth_after)
+
 
 ################################################################################
 # Stuff below this line is private to this file.

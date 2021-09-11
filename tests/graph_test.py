@@ -411,14 +411,16 @@ class GraphTest(unittest.TestCase):
          g.get_node_by_name("output")],
         nodes_in_bfs)
 
-  def test_breadth_first_visitor_escape_nested_functions(self):
+  def test_breadth_first_visitor_escape_nested_function(self):
     g = self.build_graph_with_nested_function_call()
     nodes_in_bfs = []
     def visit(node):
       nodes_in_bfs.append(node)
 
     nodes_in_bfs = []
-    f = g.get_function_graph_by_name(g.function_names[0])
+    multiplier_function_name = g.get_node_by_name(
+        "x").outputs[0].consumers()[0].get_attr("f").name
+    f = g.get_function_graph_by_name(multiplier_function_name)
     g.breadth_first_visitor(
         visit,
         starting_nodes=[f.get_node_by_name("function_multiplier")],
@@ -437,10 +439,12 @@ class GraphTest(unittest.TestCase):
     def visit(node):
       nodes_in_bfs.append(node)
 
-    add_node = list(g.nodes_iterator(lambda n:n.name=='add', iterate_functions=True))[0]
-    multiplier_function_name = g.get_node_by_name("x").outputs[0].consumers()[0].get_attr('f').name
-    multiplier_function_graph = g.get_function_graph_by_name(multiplier_function_name)
-    adder_function_graph = add_node.graph
+    add_node = list(
+        g.nodes_iterator(lambda n: n.name == "add", iterate_functions=True))[0]
+    multiplier_function_name = g.get_node_by_name(
+        "x").outputs[0].consumers()[0].get_attr("f").name
+    multiplier_function_graph = g.get_function_graph_by_name(
+        multiplier_function_name)
     nodes_in_bfs = []
     g.breadth_first_visitor(
         visit,
@@ -562,12 +566,23 @@ class GraphTest(unittest.TestCase):
     def visit(node):
       nodes_in_backwards_bfs.append(node)
 
-    add_node = list(g.nodes_iterator(lambda n:n.name=='add', iterate_functions=True))[0]
-    multiplier_function_name = g.get_node_by_name("x").outputs[0].consumers()[0].get_attr('f').name
-    multiplier_function_graph = g.get_function_graph_by_name(multiplier_function_name)
+    add_node = list(
+        g.nodes_iterator(lambda n: n.name == "add", iterate_functions=True))[0]
+    multiplier_function_name = g.get_node_by_name(
+        "x").outputs[0].consumers()[0].get_attr("f").name
+    multiplier_function_graph = g.get_function_graph_by_name(
+        multiplier_function_name)
 
-    adder_call_op = list(g.nodes_iterator(lambda n:n.op_type=='PartitionedCall' and n.get_attr('f').name == add_node.graph.name, iterate_functions=True))[0]
-    multiplier_call_op = list(g.nodes_iterator(lambda n:n.op_type=='PartitionedCall' and n.get_attr('f').name != add_node.graph.name, iterate_functions=True))[0]
+    adder_call_op = list(
+        g.nodes_iterator(
+            lambda n: (n.op_type == "PartitionedCall" and
+                       n.get_attr("f").name == add_node.graph.name),
+            iterate_functions=True))[0]
+    multiplier_call_op = list(
+        g.nodes_iterator(
+            lambda n: (n.op_type == "PartitionedCall" and
+                       n.get_attr("f").name != add_node.graph.name),
+            iterate_functions=True))[0]
 
     g.backwards_breadth_first_visitor(
         visit,
@@ -582,6 +597,40 @@ class GraphTest(unittest.TestCase):
          g.get_node_by_name("y")],
          nodes_in_backwards_bfs)
 
+  def test_visialize(self):
+    try:
+      import graphviz
+    except ModuleNotFoundError as error:
+      print("WARNING: graphviz is not installed, skipping test")
+      return
+    g = self.build_graph_with_nested_function_call()
+    gv_graph = gde.util.parse_graphviz_json(g.visualize(format="json").decode())
+
+    expected_gv_graph = {
+        "x": ["PartitionedCall"],
+        "y": ["PartitionedCall"],
+        "PartitionedCall": ["output"],
+        "output": []
+    }
+    self.assertEqual(expected_gv_graph, gv_graph)
+
+  def test_node_visialize(self):
+    try:
+      import graphviz
+    except ModuleNotFoundError as error:
+      print("WARNING: graphviz is not installed, skipping test")
+      return
+    g = self.build_graph_with_nested_function_call()
+    gv_graph = gde.util.parse_graphviz_json(
+        g.get_node_by_name("PartitionedCall").visualize(format="json").decode())
+
+    expected_gv_graph = {
+        "x": ["PartitionedCall"],
+        "y": ["PartitionedCall"],
+        "PartitionedCall": ["output"],
+        "output": []
+    }
+    self.assertEqual(expected_gv_graph, gv_graph)
 
 if __name__ == "__main__":
   unittest.main()

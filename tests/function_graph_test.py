@@ -147,5 +147,26 @@ class FunctionGraphTest(unittest.TestCase):
       c = tf_g.get_tensor_by_name("c:0")
       self.assertEqual(4, sess.run(output_tensor, {c: [2, 1, 5]}))
 
+  def test_visialize(self):
+    try:
+      import graphviz
+    except ModuleNotFoundError as error:
+      print("WARNING: graphviz is not installed, skipping test")
+      return
+    tf_g = self.build_tf_graph()
+    graph = gde.Graph(tf_g)
+    function_graph = graph.get_function_graph_by_name(graph.function_names[0])
+    gv_graph = gde.util.parse_graphviz_json(
+        function_graph.visualize(format="json").decode())
+
+    expected_gv_graph = {
+        "x": ["mul"],
+        "function_multiplier": ["mul"],
+        "mul": ["Identity"],
+        "Identity": []
+    }
+    self.assertEqual(expected_gv_graph, gv_graph)
+
+
 if __name__ == "__main__":
   unittest.main()

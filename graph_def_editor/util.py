@@ -22,6 +22,7 @@ from __future__ import print_function
 
 import collections
 import os
+import json
 import re
 import sys
 if sys.version >= '3':
@@ -636,12 +637,16 @@ def python_type_to_attr_value(value, #type: Any
   # Must check for bool before int because bool is a subclass of int in Python
   elif isinstance(value, bool):
     return tf.AttrValue(b=value)
-  elif isinstance(value, int):
+  elif (isinstance(value, int) or
+        isinstance(value, np.int32) or
+        isinstance(value, np.int64)):
     return tf.AttrValue(i=value)
-  elif isinstance(value, float):
+  elif isinstance(value, float) or isinstance(value, np.float):
     return tf.AttrValue(f=value)
   elif isinstance(value, tf.DType):
     return tf.AttrValue(type=value.as_datatype_enum)
+  elif isinstance(value, np.dtype):
+    return tf.AttrValue(type=tf.as_dtype(value).as_datatype_enum)
   elif isinstance(value, tf.TensorShape):
     return tf.AttrValue(shape=value.as_proto())
   elif isinstance(value, np.ndarray):
@@ -650,12 +655,14 @@ def python_type_to_attr_value(value, #type: Any
   #  here
   else:
     raise ValueError("Don't know how to convert a {} to "
-                     "tf.AttrValue for attribute {}".format(type(value)), attr_name)
+                     "tf.AttrValue for attribute {}".format(
+                         type(value), attr_name))
 
 
-def attr_value_to_python_type(attr_value, # type: tf.AttrValue
-                              attr_name   # type: String
-                              ):
+def attr_value_to_python_type(
+    attr_value,  # type: tf.AttrValue
+    attr_name  # type: String
+):
   # type (...) -> Any
   """
   Inverse of python_type_to_attr_value().
@@ -849,3 +856,26 @@ def copy_directory(oldpath, newpath, overwrite=False):
       remote_file_path = os.path.join(newpath,
                                       full_filename[1 + len(oldpath) :])
       tf.gfile.Copy(full_filename, remote_file_path, overwrite=overwrite)
+
+
+def parse_graphviz_json(json_string):
+  """Parses JSON representation of graphviz graph.
+
+  Args:
+    json_string: graphviz graph representation in JSON string format.
+
+  Returns:
+    graph in a dictionary format.
+  """
+  d = json.loads(json_string)
+  gv_graph = {}
+  node_id_to_name = {}
+  for obj in d["objects"]:
+    node_id_to_name[obj["_gvid"]] = obj["name"]
+    gv_graph[obj["name"]] = list()
+
+  for edge in d["edges"]:
+    gv_graph[node_id_to_name[edge["tail"]]].append(
+        node_id_to_name[edge["head"]])
+
+  return gv_graph
