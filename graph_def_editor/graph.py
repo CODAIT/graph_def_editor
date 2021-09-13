@@ -1,3 +1,4 @@
+# Copyright 2021 Google. All Rights Reserved.
 # Copyright 2019 IBM. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,16 +19,18 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from collections import defaultdict
 import datetime
-from distutils import dir_util
 import os
 from six import string_types
 import tensorflow.compat.v1 as tf
 import sys
 if sys.version >= '3':
   from typing import Tuple, Dict, FrozenSet, Iterable, Union, Set, Any
+import queue
 
-from graph_def_editor import node, util, tensor, variable
+from graph_def_editor import base_graph, function_graph, node, util, tensor, variable, subgraph
+import graph_def_editor.visualization.graphviz_wrapper as gvw
 
 # TODO: Move this protobuf into this project so we don't depend on
 #  tf.core.framework
@@ -45,6 +48,7 @@ __all__ = [
 # Special attribute in which TensorFlow stores frame names for while loops (
 # see node_to_frame_name() for more information
 _FRAME_NAME_ATTR = "frame_name"
+_INPUT_DUMMY_OP_NAME = "__input__"
 
 
 class GraphVisitor(object):
@@ -54,6 +58,9 @@ class GraphVisitor(object):
   def visit_node(self, n):
     # type: (node.Node) -> None
     raise NotImplementedError()
+
+  def __call__(self, n):
+    return self.visit_node(n)
 
 
 class SaverInfo(object):
@@ -99,8 +106,7 @@ class SignatureInfo(object):
     # type: () -> Dict[str, Any]
     return self._signature_defs
 
-
-class Graph(object):
+class Graph(base_graph.BaseGraph):
   """
   Mutable surrogate for a `tf.GraphDef` protocol buffer message
 
@@ -114,15 +120,17 @@ class Graph(object):
   """
 
   def __init__(
-          self,
-          g = None, # type: Union[tf.Graph, tf.GraphDef]
-          name = None, # type: str
-          collections = None, # type: Dict[str, meta_graph_pb2.CollectionDef]
-          saver_info = None, # type: SaverInfo
-          signature_info = None # type: SignatureInfo
-          ):
-    """
-    Wrap a tf.GraphDef protocol buffer in a Graph object.
+      self,
+      g=None,  # type: Union[tf.Graph, tf.GraphDef]
+      name=None,  # type: str
+      collections=None,  # type: Dict[str, meta_graph_pb2.CollectionDef]
+      saver_info=None,  # type: SaverInfo
+      signature_info=None,  # type: SignatureInfo,
+      object_graph_def=None,  # type: saved_object_graph_pb2.SavedObjectGraph
+      stripped_op_list=None,  # type: op_def_pb2.OpList
+      asset_file_def=None,  # type: meta_graph_pb2.AssetFileDef
+  ):
+    """Wrap a tf.GraphDef protocol buffer in a Graph object.
 
     Args:
       g: a tf.Graph or tf.GraphDef protobuf that represents a
@@ -130,7 +138,7 @@ class Graph(object):
         tf.GraphDef
       name: Optional human-readable name for the graph. If not provided,
         the constructor will generate a name.
-      collections: Optional iterable of tf.MetaGraphDef.CollectionDefEntry 
+      collections: Optional iterable of tf.MetaGraphDef.CollectionDefEntry
         objects containing information about collections in the graph.
         Note that this constructor will pull collection info out of `g` if
         it is a `tf.Graph` and `collections` is `None`.
@@ -138,36 +146,46 @@ class Graph(object):
         `tf.train.Saver` object that can save and restore variables in this
         graph.
       signature_info: Optional semi-serialized information about entry points
-        to the graph, AKA signatures
+        to the graph, AKA signatures.
+      object_graph_def: Optional SavedObjectGraph for TF2.x.
+      stripped_op_list: Optional stripped op list.
+      asset_file_def: Optional saved model assets.
     """
+    if name is None:
+      time_str = datetime.datetime.now().isoformat()
+      name = "GraphDef Editor Graph created {}".format(time_str)
+    super(Graph, self).__init__(name)
+    self._graph = None
     if g is None:
-      graph_def = tf.GraphDef()
+      self._graph_def = tf.GraphDef()
     elif isinstance(g, tf.GraphDef):
-      graph_def = g
+      self._graph_def = g
     elif isinstance(g, tf.Graph):
-      graph_def = g.as_graph_def()
+      self._graph_def = g.as_graph_def()
+      self._graph = g
       if collections is None:
         meta_gd = tf.train.export_meta_graph(graph=g)
         collections = _extract_collection_defs(meta_gd)
     else:
       raise TypeError("Graph is of type {}. Expected a tf.Graph or GraphDef "
                       "proto".format(type(g)))
-    if name is None:
-      time_str = datetime.datetime.now().isoformat()
-      name = "GraphDef Editor Graph created {}".format(time_str)
     if signature_info is None:
       signature_info = SignatureInfo()
     elif not isinstance(signature_info, SignatureInfo):
       raise ValueError("signature_info argument must be a SignatureInfo object")
 
+    # Caching tf.Graph object, so we won't have to load it again.
+    if self._graph is None:
+      self._graph = tf.Graph()
+      with self._graph.as_default():
+        tf.import_graph_def(self._graph_def, name="")
+
     # Populate fields of object
-    self._name = name  # str
     self._version = 0  # Must happen first; other init code needs self._version
     self._frozen = False  # bool
-    self._graph_def = graph_def  # tf.GraphDef
     self._next_id = 1  # int
-    output_map = _decode_graph(graph_def)
     self._node_name_to_node = {}  # Dict[str, node.Node]; key is node name
+    output_map = _decode_graph(self._graph)
     self._node_to_frame_names = None
     self._frame_name_to_nodes = None
     self._head_name_to_coloc_group = None  # Dict[str, FrozenList[str]]
@@ -175,14 +193,15 @@ class Graph(object):
     self._collection_name_to_type = None  # Dict[str, str], generated on demand
     self._passthrough_collections = {}  # Dict[str, List[CollectionDef]]
     self._passthrough_saver = None
-    self._passthrough_versions = graph_def.versions  # tf.VersionDef
+    self._passthrough_versions = self._graph_def.versions  # tf.VERSIONDef
+    self._function_graphs = dict()  # Dict[str, gde.FuncGraph], on demand
 
     # Load nodes in three passes because the g may contain cycles.
-    for node_def in graph_def.node:
+    for node_def in self._graph_def.node:
       self.add_node_from_node_def(node_def, set_inputs=False)
-    for node_def in graph_def.node:
-        self[node_def.name].set_outputs_from_pairs(output_map[node_def.name])
-    for node_def in graph_def.node:
+    for node_def in self._graph_def.node:
+      self[node_def.name].set_outputs_from_pairs(output_map[node_def.name])
+    for node_def in self._graph_def.node:
       self[node_def.name].set_inputs_from_strings(node_def.input,
                                                   set_control_inputs=True)
     # Collections reference nodes and variables
@@ -194,41 +213,13 @@ class Graph(object):
     # so load after variables are constituted (i.e. from collections)
     self._passthrough_saver = saver_info
     self._signatures = signature_info
-
-  @property
-  def name(self):
-    """
-    Returns human-readable name for this graph. This name may not be unique
-    across graphs.
-    """
-    return self._name
+    self._object_graph_def = object_graph_def
+    self._stripped_op_list = stripped_op_list
+    self._asset_file_def = asset_file_def
 
   @property
   def has_passthrough_saver(self):
     return self._passthrough_saver is not None
-
-  def add_node_from_node_def(self, node_def, set_inputs = False):
-    # type: (tf.NodeDef, bool) -> node.Node
-    """
-    Unpack a `tf.NodeDef` protobuf into a mutable `Node` object.'
-
-    Does NOT set the outputs of the node.
-
-    Args:
-      g: Graph in which the node will be created
-      node_def: Fully-populated NodeDef proto; all fields, including inputs,
-        will be used.
-      set_inputs: Optional. If True, also populate the data and control inputs
-        of the returned Node. This operation will only work if the targets of
-        those inputs are already present in the graph.
-    """
-    ret = self.add_node(name=node_def.name, op_name=node_def.op)
-    ret.device = node_def.device
-    for key in node_def.attr:
-      ret.add_attr(key, util.attr_value_to_python_type(node_def.attr[key]))
-    if set_inputs:
-      ret.set_inputs_from_strings(node_def.input, set_control_inputs=True)
-    return ret
 
   def add_collection_from_collection_def(
           self,
@@ -237,14 +228,14 @@ class Graph(object):
           validate_name = True):
     # type: (str, meta_graph_pb2.CollectionDef, bool) -> None
     """
-    Unpack a `tf.MetaGraphDef.CollectionDefEntry` of serialized variables 
-    into a collection of variables in this graph. The collection must not exist. 
+    Unpack a `tf.MetaGraphDef.CollectionDefEntry` of serialized variables
+    into a collection of variables in this graph. The collection must not exist.
     Variables that do not already exist will be created.
 
     Note that this method is intended to be used to bulk-load a collection.
     To add individual items to a collection one-by-one, call the
     `add_to_collection` methods of `Node`, etc., objects.
-    
+
     Args:
       collection_name: Name of collection
       collection_def: Serialized information about the collection
@@ -258,7 +249,7 @@ class Graph(object):
     if collection_def.HasField("node_list"):
       for node_name in collection_def.node_list.value:
         # Check if node name is a Tensor type
-        if node_name.rfind(':') > -1:
+        if node_name.rfind(":") > -1:
           n = self.get_tensor_by_name(node_name)
         else:
           n = self.get_node_by_name(node_name)
@@ -268,368 +259,47 @@ class Graph(object):
         var = self.add_variable_from_variable_def(serialized_var,
                                                   skip_if_present=True)
         var.add_to_collection(collection_name)
-    elif (collection_def.HasField("int64_list")
-          or collection_def.HasField("float_list")
+    elif (collection_def.HasField("int64_list") \
+          or collection_def.HasField("float_list") \
           or collection_def.HasField("any_list")):
       self._passthrough_collections[collection_name] = collection_def
       if self._collection_name_to_type is not None:
         self._collection_name_to_type[collection_name] = "passthrough"
     else:
       raise ValueError("Unknown collection with name: {}".format(
-        collection_name))
-
-  def __getitem__(self, name):
-    # type: (str) -> Union[tensor.Tensor, 'node.Node']
-    """
-    Convenience method to retrieve a node or tensor of the graph by name
-
-    Args:
-      name: Name of the node or tensor to return. Case-sensitive.
-
-    Returns the named item as a `gde.Node` or `gde.Tensor` object. If there
-    is a conflict between node and tensor names, node names win.
-    """
-    if not isinstance(name, string_types):
-      raise TypeError("name must be a string; got type {}".format(type(name)))
-
-    if self.contains_node(name):
-      return self._node_name_to_node[name]
-    elif self.contains_tensor(name):
-      return self.get_tensor_by_name(name)
-    else:
-      raise ValueError("No node or tensor '{}' found in graph".format(name))
-
-  def get_node_by_name(self, name):
-    # type: (str) -> node.Node
-    """
-    Retrieve a node in the graph by name.
-
-    Args:
-      name: Name of the node. Case-sensitive.
-
-    Returns the indicated node as a `gde.Node` object.
-    """
-    if self.contains_node(name):
-      return self._node_name_to_node[name]
-    else:
-      raise ValueError("No node '{}' found in graph".format(name))
-
-  def contains_node(self, name):
-    # type: (str) -> bool
-    """
-    Returns true if the graph has a node by the indicated name. Exact string
-    match.
-    """
-    if not isinstance(name, string_types):
-      raise ValueError("Node name argument is not a string, but is of type "
-                       "{}".format(type(name)))
-    return name in self._node_name_to_node.keys()
-
-  def add_node(self,
-               name, # type: str
-               op_name, # type: str
-               uniquify_name = False # type: bool
-               ):
-    # type: (...) -> node.Node
-    """
-    Add a new, empty node to the graph.
-    Args:
-      name: Name for the new op
-      op_name: Name of the type of operation for the node
-      uniquify_name: Generate a unique name from this name if the graph
-        already has a node with the indicated name. If False, raise an
-        exception if the name is in use.
-
-    Returns:
-      `MutableNode` wrapper for the new node.
-
-    Raises:
-      ValueError if the name is already in use and `uniquify_name` is False
-    """
-    if uniquify_name:
-      name = self.unique_name(name)
-    elif self._name_in_use(name):  # and not uniquify_name
-      raise ValueError("Graph already contains a node with name '{}' "
-                       "(Note that this check is case-insensitive)."
-                       .format(name))
-    ret = node.Node(self, self._get_next_id(), name=name, op_name=op_name)
-    self._node_name_to_node[name] = ret
-    self.increment_version_counter()
-    return ret
-
-  def add_node_from_node_def(self,
-                             node_def, # type: tf.NodeDef
-                             set_inputs = False, # type: bool
-                             set_control_inputs = False # type: bool
-                             ):
-    # type: (...) -> node.Node
-    """
-    Adds a new node to the graph, populating fields of the node from a
-    `tf.NodeDef` protocol buffer.
-
-    Equivalent to calling `add_node()`, then populating the relevant fields
-    of the returned MutableNode object.
-
-    Args:
-      node_def: Protocol buffer describing parameters of the new node.
-      set_inputs: If True, populate the node's inputs list from the list of
-        inputs in the `NodeDef`
-      set_control_inputs: Also set control inputs. Must be False if
-        `set_inputs` is False.
-
-    Returns:
-      `MutableNode` wrapper for the new node
-    """
-    if set_control_inputs and not set_inputs:
-      raise ValueError("set_inputs must be True if set_control_inputs is True")
-    ret = self.add_node(node_def.name, node_def.op)
-    if set_inputs:
-      ret.set_inputs_from_strings(node_def.input,
-                                  set_control_inputs=set_control_inputs)
-    ret.device = node_def.device
-    ret.clear_attrs()
-    for key in node_def.attr:
-      ret.add_attr(key, node_def.attr[key])
-
-    # Don't need to increment version counter; add_node() already did that.
-    return ret
-
-  def remove_node_by_name(self, name, check_for_refs = True):
-    # type: (str, str) -> None
-    """
-    Removes the indicated node from this graph and from any collections in
-    this graph.
-
-    The caller is responsible for removing all links to the indicated node
-    prior to making this call.
-
-    Args:
-      name: name of the node to remove
-      check_for_refs: Optional. If True, raise an exception if there are any
-        other nodes in the graph that reference this node. If False, allow
-        removal of nodes with outstanding references to them. In the latter
-        case, the caller is responsible for cleaning up the graph afterwards.
-    """
-    n = self.get_node_by_name(name)
-    if check_for_refs:
-      for t in n.outputs:
-        if len(t.consumers()) > 0:
-          raise ValueError("Removing node '{}' would leave dangling "
-                           "references from nodes {} to tensor '{}'"
-                           "".format(name, [c.name for c in t.consumers()],
-                                     t.name))
-    # noinspection PyProtectedMember
-    n._remove_from_graph()
-    del self._node_name_to_node[name]
-    self.increment_version_counter()
-    # Don't need to update collection info because collection membership is
-    # stored in the node.
-    # Don't need to update consumers of tensors because that information is
-    # calculated dynamically by iterating over nodes.
-
-  def rename_node(self, old_name, new_name):
-    # type: (str, str) -> None
-    """
-    Change the name of a node in the graph.
-
-    Args:
-      old_name: Name of an existing node
-      new_name: New name for the node in question. Must not currently be in use.
-    """
-    if self.contains_node(new_name):
-      raise ValueError("Graph already has a node under name '{}'".format(
-        new_name))
-    n = self.get_node_by_name(old_name)
-    # noinspection PyProtectedMember
-    n._change_name(new_name)
-    del self._node_name_to_node[old_name]
-    self._node_name_to_node[new_name] = n
-    self.increment_version_counter()
-
-  def add_variable(self, name):
-    # type: (str) -> variable.Variable
-    """
-    Adds a new variable to the graph.
-
-    Args:
-      name: Name of the variable. Must not already be in use.
-
-    Returns the `gde.Variable` object corresponding to the added variable.
-    """
-    if name in self._variable_name_to_variable:
-      raise ValueError("Variable name '{}' already in use".format(name))
-    v = variable.Variable(self)
-    v.name = name
-    self._variable_name_to_variable[name] = v
-    return v
-
-  def add_variable_from_variable_def(self, variable_def,
-                                     skip_if_present = False):
-    # type: (Any, bool) -> None
-    """
-    Adds a new variable to the graph and populates the fields of the
-    corresponding Variable object according to a protocol buffer message.
-
-    Args:
-      variable_def: `tensorflow.core.framework.variable_pb2.VariableDef`
-        protobuf object. May be serialized as a `bytes` object.
-      skip_if_present: If True, silently skips inserting duplicate variables,
-        as long as they don't conflict with existing variables.
-
-    Returns the `gde.Variable` object corresponding to the added variable.
-    """
-    v = variable.Variable(self)
-    v.from_proto(variable_def, allow_duplicates=skip_if_present)
-    if v.name not in self._variable_name_to_variable:
-      self._variable_name_to_variable[v.name] = v
-    return self._variable_name_to_variable[v.name]
+          collection_name))
 
   @property
-  def variable_names(self):
-    return self._variable_name_to_variable.keys()
+  def function_names(self):
+    # type: () -> Iterable[str]
+    return [f.signature.name for f in self._graph_def.library.function]
 
-  def get_variable_by_name(self, name):
-    # type: (str) -> variable.Variable
+  def get_function_graph_by_name(self, function_name):
     """
-    Fetch a variable by its variable name.
+    Retrieve a function by name and wrap it into a function_graph.FunctionGraph.
 
     Args:
-      name: Name of a variable in this graph.
+      function_name: Function name.
 
-    Returns the variable associated with the name. Raises an exception if
-    there is no variable with the indicated name.
+    Returns: function_graph.FunctionGraph object.
+
+    Raises: ValueError if the function with specified name is not found
+      in the graph.
     """
-    return self._variable_name_to_variable[name]
+    if function_name not in self.function_names:
+      raise ValueError("Function '{}' is not found in graph".format(
+          function_name))
 
-  def _name_in_use(self, name):
-    # type: (str) -> bool
-    """Check whether a name is in use, using the same collision semantics as
-    TensorFlow: Exact lowercase string match.
+    if function_name not in self._function_graphs:
+      self._function_graphs[function_name] = function_graph.FunctionGraph(
+          name=function_name,
+          parent_tf_graph=self._graph,
+          parent_graph=self)
 
-    Args:
-      name: Name of a potential node in the graph.
+    return self._function_graphs[function_name]
 
-    Returns True if the indicated name is currently in use, ignoring case.
-    """
-    return name.lower() in [k.lower() for k in self._node_name_to_node.keys()]
-
-  def unique_name(self, name):
-    # type: (str) -> str
-    """Emulate the behavior of the method by the same name in `tf.Graph`.
-
-    Does *not* emulate the `name_stack` field of `tf.Graph`.
-
-    Unlike the original method, this version does *not* keep a separate table
-    of names currently "in use for the purposes of `unique_name()`", but instead
-    refers directly to internal data structures to find names that are truly
-    in use.
-
-    Args:
-      name: The name for an operation.
-
-    Returns:
-      A variant of `name` that has been made unique by appending a key to it
-      in the same way that `tf.Graph.unique_name()` would.
-    """
-    # For the sake of checking for names in use, we treat names as case
-    # insensitive (e.g. foo = Foo).
-    if not self._name_in_use(name):
-      return name
-
-    # Generate a unique version by appending "_1", "_2", etc. until we find
-    # an unused name. Note that this approach will behave slightly
-    # differently from the original if nodes are deleted.
-    i = 1
-    new_name = "{}_{}".format(name, i)
-    while self._name_in_use(new_name):
-      i = i + 1
-      new_name = "{}_{}".format(name, i)
-    return new_name
-
-  @property
-  def node_names(self):
-    # type: () -> Iterable[node.Node]
-    return self._node_name_to_node.keys()
-
-  @property
-  def nodes(self):
-    # type: () -> Tuple[node.Node]
-    """
-    Returns:
-      A list of all nodes, both immutable and mutable, present in the graph
-      after the edits that this object is buffering.
-    """
-    return tuple(self._node_name_to_node.values())
-
-  @property
-  def tensors(self):
-    # type: () -> List[tensor.Tensor]
-    """
-    Return a list of all the tensors which are input or output of an op in
-    the graph.
-    """
-    ts = []
-    for op in self.nodes:
-      ts += op.outputs
-    return ts
-
-  def contains_tensor(self, tensor_name):
-    # type: (str) -> bool
-    """
-    Returns true if the graph has a tensor by the indicated name. Exact string
-    match.
-
-    Args:
-      tensor_name: TensorFlow-format name ('node name:input num', or 'node
-        name' as shorthand for 'node name:0')
-
-    Raises ValueError if the tensor name is not properly formatted.
-    """
-    error_msg = "Invalid tensor name '{}': {}"
-    node_name, output_ix = _decode_tensor_name(tensor_name, error_msg)
-    if node_name not in self._node_name_to_node:
-      return False
-    else:
-      n = self[node_name]
-      if output_ix >= len(n.outputs):
-        return False
-      else:
-        return True
-
-  def get_tensor_by_name(self, tensor_name, error_msg = None):
-    # type: (str, str) -> tensor.Tensor
-    """
-    Retrieve a tensor by human-readable name.
-
-    Args:
-      tensor_name: TensorFlow-format name ('node name:input num', or 'node
-        name' as shorthand for 'node name:0')
-      error_msg: Optional format string for raising errors. Must be able to
-        serve as an input to `str.format()` with two arguments: tensor name
-        string and reason for failure.
-
-    Returns: gde.Tensor object corresponding to the indicated tensor.
-
-    Raises ValueError if the name is invalid or references a tensor that does
-    not exist.
-    """
-    if error_msg is None:
-      error_msg = "Invalid tensor name '{}': {}"
-    node_name, output_ix = _decode_tensor_name(tensor_name, error_msg)
-    if node_name not in self._node_name_to_node:
-      raise ValueError(error_msg.format(
-        tensor_name, "Node name '{}' not found in graph.".format(node_name)
-      ))
-    n = self[node_name]
-    if output_ix >= len(n.outputs):
-      raise ValueError(error_msg.format(
-        tensor_name, "Requested output {}, but node '{}' has {} "
-                     "outputs.".format(output_ix, node_name, len(n.outputs))
-      ))
-    return n.output(output_ix)
-
-  def to_graph_def(self, add_shapes = True):
-    # type: (bool) -> tf.GraphDef
+  def to_graph_def(self, add_shapes=True):
+    # type: (bool) -> tf.compat.v1.GraphDef
     """
     Args:
       add_shapes: If True, add the special "_output_shapes" attribute with
@@ -642,6 +312,23 @@ class Graph(object):
     ret.versions.CopyFrom(self._passthrough_versions)
     for op in self.nodes:
       op.to_node_def(ret.node.add(), add_shapes)
+
+    # Copy library as is.
+    if self._graph_def and self._graph_def.library:
+      ret.library.CopyFrom(self._graph_def.library)
+
+    # Update functions in library that were instantiated as function graphs.
+    for f_name, f_graph in self._function_graphs.items():
+      function_index_to_update = None
+      for index in range(0, len(ret.library.function)):
+        if ret.library.function[index].signature.name == f_name:
+          function_index_to_update = index
+          break
+      if function_index_to_update is None:
+        ValueError("Function '{}' is not found in graph".format(f_name))
+      ret.library.function[function_index_to_update].Clear()
+      ret.library.function[function_index_to_update].MergeFrom(
+          f_graph.to_function_graph_def())
     return ret
 
   def to_tf_graph(self):
@@ -676,14 +363,15 @@ class Graph(object):
     """
     if tags is None:
       tags = [tf.saved_model.tag_constants.SERVING]
-    if os.path.exists(saved_model_path):
+    if tf.gfile.Exists(saved_model_path):
       raise ValueError("Output path '{}' already exists".format(
         saved_model_path))
-    if not os.path.exists(os.path.dirname(saved_model_path)):
+    saved_model_path = saved_model_path.rstrip("/")
+    if not tf.gfile.Exists(os.path.dirname(saved_model_path)):
       raise ValueError("Parent directory '{}' of output dir '{}' does not "
                        "exist".format(os.path.dirname(saved_model_path),
                                       saved_model_path))
-    os.mkdir(saved_model_path)
+    tf.gfile.MakeDirs(saved_model_path)
 
     # Core part of the SavedModel is a protocol buffers file containing a
     # SavedModel protocol buffer message.
@@ -732,6 +420,10 @@ class Graph(object):
     # set it to False.
     meta_info_def.stripped_default_attrs = False
 
+    # Passing through stripped_op_list.
+    if self._stripped_op_list:
+      meta_info_def.stripped_op_list.CopyFrom(self._stripped_op_list)
+
     meta_graph.meta_info_def.CopyFrom(meta_info_def)
 
     # After the meta_info_def comes a GraphDef proto holding all the graph
@@ -745,17 +437,20 @@ class Graph(object):
     # instance that will be used to reconstitute any variables in the graph
     if self.has_passthrough_saver:
       meta_graph.saver_def.CopyFrom(self._passthrough_saver.saver_def)
+      if not tf.gfile.Exists(_vars_dir_for_saved_model(saved_model_path)):
+        tf.gfile.MkDir(_vars_dir_for_saved_model(saved_model_path))
       # Copy serialized variables checkpoint wholesale, because the checkpoint
       # format is a black box to us.
-      dir_util.copy_tree(self._passthrough_saver.path,
-                         _vars_dir_for_saved_model(saved_model_path))
+      util.copy_directory(self._passthrough_saver.path,
+                          _vars_dir_for_saved_model(saved_model_path),
+                          overwrite=True)
     elif len(self.variable_names) > 0:
       raise NotImplementedError("Can't generate a SaverDef.")
     else:
       # Zero variables, no passthrough SaverDef.
       # For this case, TensorFlow creates an empty variables directory and
       # doesn't set the "saver_def" field. We emulate this behavior.
-      os.mkdir(_vars_dir_for_saved_model(saved_model_path))
+      tf.gfile.MkDir(_vars_dir_for_saved_model(saved_model_path))
 
     # The next field, "collection_def", holds serialized information about all
     # collections in the MetaGraph.
@@ -784,47 +479,39 @@ class Graph(object):
 
     # The final field, asset_file_def, stores information about additional
     # assets that are packaged along with the graph in the SavedModel's
-    # "assets" directory. Fow now we leave this field empty.
-    # TODO(frreiss): Represent assets as a field in the Graph class and
-    #  serialize them here.
+    # "assets" directory.
+    if self._asset_file_def:
+      meta_graph.asset_file_def.extend(self._asset_file_def)
+      from_assets_path = os.path.join(self._passthrough_saver.path, "..",
+                                      "assets")
+      if tf.gfile.Exists(from_assets_path):
+        to_assets_path = os.path.join(saved_model_path, "assets")
+
+        if not tf.gfile.Exists(to_assets_path):
+          tf.gfile.MkDir(to_assets_path)
+        util.copy_directory(from_assets_path,
+                            to_assets_path,
+                            overwrite=True)
+
+    # It should be fine copying object_graph_def, as function signature
+    # changes are not supported.
+    if self._object_graph_def:
+      meta_graph.object_graph_def.CopyFrom(self._object_graph_def)
 
     # At this point, we have created the root directory for the SavedModel,
     # as well as the checkpoints directory. The only thing left to write is
     # the SavedModel protobuf itself.
-    with open(saved_model_path + "/saved_model.pb", "wb") as f:
+    with tf.gfile.Open(saved_model_path + "/saved_model.pb", "wb") as f:
       f.write(saved_model.SerializeToString())
     return saved_model
 
-  @property
-  def version(self):
-    # type: () -> int
-    """
-    Returns a counter that goes up every time this graph is changed.
-    """
-    return self._version
-
-  @property
-  def frozen(self):
-    # type: () -> bool
-    """
-    True if the graph is configured to raise an exception on any structural
-    modification.
-    """
-    return self._frozen
-
-  @frozen.setter
-  def frozen(self, value):
-    # type: (bool) -> None
-    self._frozen = value
 
   def increment_version_counter(self):
     """
     Mark the structure of this graph as "changed" and invalidate any cached
     information about the edges of the graph.
     """
-    if self.frozen:
-      raise RuntimeError("Detected a change to a frozen graph")
-    self._version += 1
+    super(Graph, self).increment_version_counter()
     self._node_to_frame_names = None
     self._frame_name_to_nodes = None
     self._head_name_to_coloc_group = None
@@ -1001,42 +688,240 @@ class Graph(object):
       self._generate_node_to_frame_name()
     return self._frame_name_to_nodes.keys()
 
-  def breadth_first_visitor(self,
-                            visitor, # type: GraphVisitor
-                            starting_nodes = None # type: Iterable[node.Node]
-                            ):
+  def nodes_iterator(
+      self,
+      predicate=lambda _: True,  # type: (node.Node) -> bool
+      iterate_functions=False  # type: bool
+      ):
+    # type: (...) -> Iterable[node.Node]
+    """
+    Returns:
+      An iterator over nodes matching predicate in current graph and
+      from function graphs if iterate_functions=True.
+    """
+    for op in self.nodes:
+      if predicate(op):
+        yield op
+    if iterate_functions:
+      for function_name in self.function_names:
+        for op in self.get_function_graph_by_name(function_name).nodes:
+          if predicate(op):
+            yield op
+
+  def breadth_first_visitor(
+      self,
+      visitor,  # type: callable
+      starting_nodes=None,  # type: Iterable[node.Node]
+      visited_nodes=None,  # type: set
+      iterate_functions=False,  # type: bool
+      escape_functions=False,  # type: bool
+      max_depth=None  # type: int
+  ):
     # type: (...) -> None
     """
     Visit all nodes reachable from a starting set in the order of a
-    breadth-first traversal. Invokes a callback at each node visited.
+    breadth-first traversal (going from node to output edges).
+    If visitor gets to a function call, and iterate_functions is True,
+    it will iterate all function nodes first and then continue with
+    remaining nodes in the graph.
+    Invokes a callback at each node visited.
 
     Args:
       visitor: Possibly-stateful callback to be invoked on each node reached
       starting_nodes: Optional list of starting nodes. If this set is not
-         provided, this method will use all nodes with zero inputs as the
-         starting set. Search will visit these nodes first, then visit their
-         children in order by parent node.
+          provided, this method will use all nodes with zero inputs as the
+          starting set. Search will visit these nodes first, then visit their
+          children in order by parent node.
+      visited_nodes: Optional set of nodes to skip iterating over.
+      iterate_functions: Indicates if we should also go inside functions if one
+          is found in the graph.
+      escape_functions: If iteration started in a function graph, indicates
+          that we should also iterate through all function callers up
+          the stack.
+      max_depth: Maximum depth to iterate up to. If None, iteration will
+          continue until boundary of the graph is reached.
+    Returns:
+      True if iteration was interrupted by visitor, otherwise False.
     """
     if starting_nodes is None:
       # Start with all of the nodes in the graph that have no inputs.
       # The maintainers of the TensorFlow scheduler like to call these nodes
       # "root nodes".
-      starting_nodes = [n for n in self.nodes if 0 == len(n.inputs)]
+      starting_nodes = [n for n in self.nodes if not n.inputs]
 
-    # Use a Python list as a node queue for the breadth-first search.
-    queue = list(starting_nodes)
-    enqueued_nodes = set(queue)
+    if visited_nodes is None:
+      visited_nodes = set()
 
-    while len(queue) > 0:
-      cur_node = queue.pop(0)
-      visitor.visit_node(cur_node)
+    nodes_queue = queue.Queue()
+    function_graph_names_set = set()
 
-      # Prepare for next stage of search
-      for out_tensor in cur_node.outputs:
-        for out_node in out_tensor.consumers():
-          if out_node not in enqueued_nodes:
-            queue.append(out_node)
-            enqueued_nodes.add(out_node)
+    starting_nodes_set = set()
+    for n in starting_nodes:
+      nodes_queue.put((n, None, max_depth))
+      starting_nodes_set.add(n)
+
+    while not nodes_queue.empty():
+      (n, input_tensor, depth) = nodes_queue.get()
+      if n in visited_nodes:
+        continue
+      if n.op_type != _INPUT_DUMMY_OP_NAME:
+        if visitor(n):
+          return True
+
+      if escape_functions and isinstance(n.graph, function_graph.FunctionGraph):
+        function_graph_names_set.add(n.graph.name)
+
+      visited_nodes.add(n)
+      if iterate_functions and n.op_type in node.PARTITIONED_CALL_OP_TYPES:
+        function_name = n.get_attr("f").name
+        f_graph = self.get_function_graph_by_name(function_name)
+
+        function_inputs = []
+        if input_tensor is not None:
+          for input_node in f_graph.nodes:
+            if input_node.op_type == _INPUT_DUMMY_OP_NAME and input_node.name in input_tensor.name:
+              function_inputs.append(input_node)
+
+        if len(function_inputs) == 0:
+          function_inputs = [input for input in f_graph.nodes if input.op_type == _INPUT_DUMMY_OP_NAME]
+
+        if self.breadth_first_visitor(
+            visitor,
+            starting_nodes=function_inputs,
+            visited_nodes=visited_nodes,
+            iterate_functions=iterate_functions,
+            escape_functions=False,
+            max_depth=depth-1 if depth is not None else None):
+          return True
+
+      for output_tensor in n.outputs:
+        for consumer in output_tensor.consumers():
+          if consumer not in visited_nodes and \
+              consumer not in starting_nodes_set:
+            if depth is not None and depth <= 0:
+              return True
+            nodes_queue.put((consumer,
+                             output_tensor,
+                             depth-1 if depth is not None else None))
+
+    if escape_functions and function_graph_names_set:
+      function_invocation_ops = self.nodes_iterator(
+          predicate=lambda f: (f.op_type in node.PARTITIONED_CALL_OP_TYPES and
+            f.get_attr("f").name in function_graph_names_set),
+          iterate_functions=True)
+      for function_invocation_op in function_invocation_ops:
+        function_output_consumers = set()
+        for output_tensor in function_invocation_op.outputs:
+          function_output_consumers.update(output_tensor.consumers())
+        if self.breadth_first_visitor(
+            visitor,
+            starting_nodes=function_output_consumers,
+            visited_nodes=visited_nodes,
+            iterate_functions=iterate_functions,
+            escape_functions=True,
+            max_depth=depth-1 if depth is not None else None):
+          return True
+    return False
+
+  def backwards_breadth_first_visitor(
+      self,
+      visitor,  # type: callable
+      starting_nodes=None,  # type: Iterable[node.Node]
+      visited_nodes=None,  # type: set
+      iterate_functions=False,  # type: bool
+      escape_functions=False,  # type: bool
+      max_depth=None
+      ):  # type: (...) -> None
+    """
+    Visit all nodes reachable from a starting set in the order of a
+    backwards breadth-first traversal (going from node to input edges).
+    If visitor gets to a function call, and iterate_functions is True,
+    it will iterate all function nodes first and then continue with
+    remaining nodes in the graph.
+    Invokes a callback at each node visited.
+
+    Args:
+      visitor: Possibly-stateful callback to be invoked on each node reached
+      starting_nodes: List of starting nodes.
+      visited_nodes: Optional set of nodes to skip iterating over.
+      iterate_functions: Indicates if we should also go inside functions if one
+          is found in the graph.
+      escape_functions: If iteration started in a function graph, indicates
+          that we should also iterate through all function callers up
+          the stack.
+      max_depth: Maximum depth to iterate up to. If None, iteration will
+          continue until boundary of the graph is reached.
+    Returns:
+      True if iteration was interrupted by visitor, otherwise False.
+    """
+    if not starting_nodes:
+      raise ValueError("starting_nodes is not provided")
+
+    nodes_queue = queue.Queue()
+    function_graph_names_set = set()
+
+    if visited_nodes is None:
+      visited_nodes = set()
+
+    starting_nodes_set = set()
+    for n in starting_nodes:
+      starting_nodes_set.add(n)
+      nodes_queue.put((n, max_depth))
+
+    while not nodes_queue.empty():
+      (n, depth) = nodes_queue.get()
+
+      if n in visited_nodes:
+        continue
+
+      if n.op_type != _INPUT_DUMMY_OP_NAME:
+        if visitor(n):
+          return True
+
+      if escape_functions and isinstance(n.graph, function_graph.FunctionGraph):
+        function_graph_names_set.add(n.graph.name)
+
+      if (iterate_functions and n.op_type in node.PARTITIONED_CALL_OP_TYPES and
+          n not in starting_nodes_set):
+        function_name = n.get_attr("f").name
+        f_graph = self.get_function_graph_by_name(function_name)
+
+        if self.backwards_breadth_first_visitor(
+            visitor,
+            starting_nodes=f_graph.output_nodes,
+            visited_nodes=visited_nodes,
+            iterate_functions=iterate_functions,
+            escape_functions=False,
+            max_depth=depth-1 if depth is not None else None):
+          return True
+
+      visited_nodes.add(n)
+      for input_tensor in n.inputs:
+        if (input_tensor.op not in visited_nodes and
+            input_tensor.op not in starting_nodes_set):
+          if depth is not None and depth <= 0:
+            return True
+          nodes_queue.put((input_tensor.op, depth-1 if depth is not None else None))
+
+    if escape_functions and function_graph_names_set:
+      function_invocation_ops = self.nodes_iterator(
+          predicate=lambda f: (f.op_type in node.PARTITIONED_CALL_OP_TYPES and
+                               f.get_attr("f").name in function_graph_names_set),
+          iterate_functions=True)
+
+      caller_ops = list(function_invocation_ops)
+
+      if len(caller_ops) > 0:
+        if self.backwards_breadth_first_visitor(
+            visitor,
+            starting_nodes=caller_ops,
+            visited_nodes=visited_nodes,
+            iterate_functions=iterate_functions,
+            escape_functions=True,
+            max_depth=depth-1 if depth is not None else None):
+          return True
+
+    return False
 
   def infer_shapes_and_dtypes(self,
                               starting_nodes = None # type: Iterable[node.Node]
@@ -1140,11 +1025,83 @@ class Graph(object):
     """
     return self._signatures.signature_defs
 
+  def _visualize_node(
+      self,
+      gde_node,
+      format=None,
+      depth=1,
+      style=True,
+      name_regex="",
+      negative_name_regex="",
+      add_digraph_func=None,
+      add_digraph_node_func=None,
+      add_digraph_edge_func=None,
+      depth_before=1,
+      depth_after=2):
+    """Return GraphViz Digraph rendering of the current and adjacent nodes.
+
+    Args:
+      gde_node: a node to visualize.
+      format: GraphViz display format. In addition to that it supports
+        jupyter_svg, and jupyter_interactive modes.
+      depth: the maximum depth of the graph to display.
+      style: whether to apply default styles.
+      name_regex: only diplay nodes that have name matching this regex.
+      negative_name_regex: only diplay nodes that have name not matching this
+        regex.
+      add_digraph_func: custom override for function for adding subraphs
+        to the resulting Digraph object.
+      add_digraph_node_func: custom override for function for adding nodes
+        (vertices) to the resulting Digraph object.
+      add_digraph_edge_func: custom override for function for adding edges
+        to the resulting Digraph object.
+      depth_before: number of adjacent nodes to show before the current one.
+      depth_after: number of adjacent nodes to show after the current one.
+
+    Returns:
+      graphviz.dot.Digraph object with visual representtion for the current
+        graph.
+    """
+
+    adjacent_nodes = set()
+    adjacent_nodes.add(gde_node)
+    self.backwards_breadth_first_visitor(
+        adjacent_nodes.add,
+        max_depth=depth_before,
+        starting_nodes=[gde_node])
+    self.breadth_first_visitor(
+        adjacent_nodes.add,
+        max_depth=depth_after,
+        starting_nodes=[gde_node])
+
+    sg = subgraph.SubGraphView(adjacent_nodes)
+
+    def custom_add_digraph_node(digraph, name, op, attributes=None):
+      attributes = []
+      if op == gde_node:
+        attributes.append(("fillcolor", "yellow"))
+      gvw.add_digraph_node(digraph, name, op, attributes)
+
+    if not add_digraph_node_func:
+      add_digraph_node_func = custom_add_digraph_node
+
+    return sg.visualize(
+        format=format,
+        depth=depth,
+        name=gde_node.name,
+        style=style,
+        name_regex=name_regex,
+        negative_name_regex=negative_name_regex,
+        add_digraph_func=add_digraph_func,
+        add_digraph_node_func=add_digraph_node_func,
+        add_digraph_edge_func=add_digraph_edge_func)
+
 
 def saved_model_to_graph(saved_model_path, # type: str
-                         tag = None, # type: str
+                         tag = None, # type: Union[str, List[str]]
                          include_saver = True, # type: bool
-                         include_signatures = True # type: bool
+                         include_signatures = True, # type: bool
+                         fallback_to_default_graph = False, # type: bool
                          ):
   # type: (...) -> Graph
   """
@@ -1152,7 +1109,7 @@ def saved_model_to_graph(saved_model_path, # type: str
 
   Args:
     saved_model_path: Path to the SavedModel's directory on disk
-    tag: User-specified tag attached to the MetaGraphDef that should be
+    tag: User-specified tags attached to the MetaGraphDef that should be
       loaded from the SavedModel. If None, verify that there is only one
       MetaGraphDef in the model and load that one.
     include_saver: If True, attach black-box information about the SavedModel's
@@ -1162,22 +1119,25 @@ def saved_model_to_graph(saved_model_path, # type: str
     include_signatures: If True, attach signature information from the
       SavedModel to the returned Graph object. Otherwise the returned graph
       will have no signatures.
+    fallback_to_default_graph: If True, fallback to saved_model.meta_graphs[0]
+      if specified tag is not found, and saved_model.meta_graphs[0] is the
+      only graph available.
 
   Returns: In-memory representation of the contents of the SavedModel as a
   Graph object.
   """
-  if not os.path.exists(saved_model_path):
-    raise ValueError("SavedModel root directory {} not found".format(
-      saved_model_path))
-  if not os.path.isdir(saved_model_path):
-    raise ValueError("SavedModel root path {} is not a directory".format(
-      saved_model_path))
+  if not tf.gfile.Exists(saved_model_path):
+    raise ValueError(
+        "SavedModel root directory {} not found".format(saved_model_path))
+  if not tf.gfile.IsDirectory(saved_model_path):
+    raise ValueError(
+        "SavedModel root path {} is not a directory".format(saved_model_path))
 
   # By convention, the main protobuf for the SavedModel is in a file called
   # "saved_model.pb"
   protobuf_file = saved_model_path + "/saved_model.pb"
   saved_model = saved_model_pb2.SavedModel()
-  with open(protobuf_file, "rb") as f:
+  with tf.gfile.Open(protobuf_file, "rb") as f:
     saved_model.ParseFromString(f.read())
 
   # Drill down to pull out the appropriate MetaGraphDef proto
@@ -1188,13 +1148,25 @@ def saved_model_to_graph(saved_model_path, # type: str
                        "tag to select a specific MetaGraphDef")
     meta_graph = saved_model.meta_graphs[0]
   else:
+    tags = set(tag) if isinstance(tag, list) else set([tag])
     matching_ixs = [
-      i for i in range(len(saved_model.meta_graphs))
-      if tag in saved_model.meta_graphs[i].meta_info_def.tags
+        i for i in range(len(saved_model.meta_graphs))
+        if tags == set(saved_model.meta_graphs[i].meta_info_def.tags)
     ]
-    if len(matching_ixs) == 0:
-      raise ValueError("No MetaGraphDef in SavedModel at {} contains tag "
-                       "'{}'".format(saved_model_path, tag))
+    if len(matching_ixs) != 1:
+      print(f"WARNING: exact match for tags {tags} is not found")
+      matching_ixs = [
+          i for i in range(len(saved_model.meta_graphs))
+          if tags.issubset(set(saved_model.meta_graphs[i].meta_info_def.tags))
+      ]
+    if not matching_ixs:
+      if fallback_to_default_graph and len(saved_model.meta_graphs) == 1:
+        print(
+            f"WARNING: specified tags {tags} are not found, using default one")
+        meta_graph = saved_model.meta_graphs[0]
+      else:
+        raise ValueError("No MetaGraphDef in SavedModel at {} contains tag "
+                         "'{}'".format(saved_model_path, tag))
     if len(matching_ixs) > 1:
       raise ValueError("{} different MetaGraphDef in SavedModel at {} "
                        "contain tag '{}'. Please specify a tag that "
@@ -1215,18 +1187,29 @@ def saved_model_to_graph(saved_model_path, # type: str
     for key in meta_graph.signature_def:
       signature_info.add_signature_def(key, meta_graph.signature_def[key])
 
+  object_graph_def = None
+  if meta_graph.object_graph_def:
+    object_graph_def=meta_graph.object_graph_def
+
+  stripped_op_list = None
+  if meta_graph.meta_info_def.stripped_op_list:
+    stripped_op_list = meta_graph.meta_info_def.stripped_op_list
+
   return Graph(graph_def,
                name=meta_graph.meta_info_def.meta_graph_version,
                collections=collections,
                saver_info=saver_info,
-               signature_info=signature_info)
+               signature_info=signature_info,
+               object_graph_def=object_graph_def,
+               stripped_op_list=stripped_op_list,
+               asset_file_def=meta_graph.asset_file_def)
 
 ################################################################################
 # Stuff below this line is private to this file.
 
 
-def _decode_graph(graph_def):
-  # type: (tf.GraphDef) -> Dict[str, List[Tuple[tf.DType, tf.TensorShape]]]
+def _decode_graph(graph):
+  # type: (tf.Graph) -> Dict[str, List[Tuple[tf.DType, tf.TensorShape]]]
   """
   Use public TensorFlow APIs to decode the important information that is not
   explicitly stored in the GraphDef proto, but which must be inferred from the
@@ -1250,11 +1233,8 @@ def _decode_graph(graph_def):
   # graph_def describes. This approach makes things easier, but there will be
   # a reduction in forwards compatibility, because import_graph_def() does a
   # lot of sanity checks that aren't necessary when rewriting a graph_def.
-  temp_graph = tf.Graph()
-  with temp_graph.as_default():
-    tf.import_graph_def(graph_def, name="")
   output_map = {op.name: [(t.dtype, t.shape) for t in op.outputs]
-                for op in temp_graph.get_operations()}
+                for op in graph.get_operations()}
   return output_map
 
 
@@ -1273,35 +1253,6 @@ def _extract_collection_defs(meta_graph):
     collections[collection_name] = meta_graph.collection_def[collection_name]
 
   return collections
-
-
-def _decode_tensor_name(tensor_name, error_msg):
-  # type: (str, str) -> Tuple[str, int]
-  """
-  Args:
-    tensor_name: TensorFlow-format name ('node name:input num', or 'node
-      name' as shorthand for 'node name:0')
-    error_msg: Format string for raising errors. Must be able to
-      serve as an input to `str.format()` with two arguments: tensor name
-      string and reason for failure.
-
-  Returns: (node name, output index) tuple identifying the tensor
-
-  Raises ValueError if the name is not properly formatted
-  """
-  if ":" in tensor_name:
-    node_name, output_ix_str = tensor_name.split(":")
-    if not output_ix_str.isdigit():
-      raise ValueError(error_msg.format(
-        tensor_name, "Invalid output index string '{}'.".format(output_ix_str)
-      ))
-    output_ix = int(output_ix_str)
-  else:
-    node_name = tensor_name
-    output_ix = 0
-
-  return node_name, output_ix
-
 
 def _duplicate_collection_error_str(
         name, # type: str

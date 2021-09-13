@@ -19,7 +19,7 @@ from tensorflow.core.framework import variable_pb2
 
 import sys
 if sys.version >= '3':
-  from graph_def_editor import graph
+  from graph_def_editor import base_graph
   from typing import AbstractSet, Union
 
 
@@ -43,7 +43,7 @@ class Variable(object):
   objects. This class tracks a similar set of pointers in protobuf land.
   """
   def __init__(self,
-               g # type: graph.Graph
+               g # type: base_graph.BaseGraph
                ):
     """
     Do not call this constructor directly.
@@ -173,7 +173,11 @@ class Variable(object):
             self._variable_name))
     # self._initializer_name should reference a node. Other names should
     # reference tensors.
-    if not self.graph.contains_node(self._initializer_name):
+    _initializer_name = self._initializer_name
+    if _initializer_name and _initializer_name.rfind(":") > 0:
+      # Adding extra check in case _initializer_name refers to a tensor.
+      _initializer_name = _initializer_name[:_initializer_name.rfind(":")]
+    if not self.graph.contains_node(_initializer_name):
       raise ValueError("Initializer name '{}' does not correspond to any "
                        "node in graph".format(self._initializer_name))
     _ = self.graph.get_tensor_by_name(self._initial_value_name,

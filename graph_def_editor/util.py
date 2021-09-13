@@ -21,6 +21,8 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
+import os
+import json
 import re
 import sys
 if sys.version >= '3':
@@ -30,7 +32,7 @@ import numpy as np
 from six import iteritems, string_types
 import tensorflow.compat.v1 as tf
 
-from graph_def_editor import graph, node, tensor
+from graph_def_editor import base_graph, node, tensor
 
 
 __all__ = [
@@ -211,7 +213,7 @@ def get_unique_graph(tops, check_types=None, none_if_empty=False):
     TypeError: if tops is not a iterable of `gde.Node`.
     ValueError: if the graph is not unique.
   """
-  if isinstance(tops, graph.Graph):
+  if isinstance(tops, base_graph.BaseGraph):
     return tops
   if not is_iterable(tops):
     raise TypeError("{} is not iterable".format(type(tops)))
@@ -249,7 +251,7 @@ def make_list_of_op(ops, check_graph=True, allow_graph=True, ignore_ts=False):
      if `check_graph` is `True`, if all the ops do not belong to the
      same graph.
   """
-  if isinstance(ops, graph.Graph):
+  if isinstance(ops, base_graph.BaseGraph):
     if allow_graph:
       return ops.nodes
     else:
@@ -280,7 +282,7 @@ def make_list_of_t(ts, check_graph=True, allow_graph=True, ignore_ops=False):
     TypeError: if `ts` cannot be converted to a list of `gde.Tensor` or,
      if `check_graph` is `True`, if all the ops do not belong to the same graph.
   """
-  if isinstance(ts, graph.Graph):
+  if isinstance(ts, base_graph.BaseGraph):
     if allow_graph:
       return ts.tensors
     else:
@@ -335,7 +337,7 @@ class ControlOutputs(object):
   """The control outputs topology."""
 
   def __init__(self,
-               g # type: graph.Graph
+               g # type: base_graph.BaseGraph
                ):
     """Create a dictionary of control-output dependencies.
 
@@ -348,7 +350,7 @@ class ControlOutputs(object):
     Raises:
       TypeError: graph is not a `gde.Graph`.
     """
-    if not isinstance(g, graph.Graph):
+    if not isinstance(g, base_graph.BaseGraph):
       raise TypeError("Expected a gde.Graph, got: {}".format(type(g)))
     self._control_outputs = {}
     self._graph = g
@@ -446,7 +448,7 @@ def placeholder_name(t=None, scope=None, prefix=_DEFAULT_PLACEHOLDER_PREFIX):
 
 
 def make_placeholder_from_tensor(
-        g, # type: graph.Graph
+        g, # type: base_graph.BaseGraph
         t, # type: tensor.Tensor
         scope=None,
         prefix=_DEFAULT_PLACEHOLDER_PREFIX
@@ -568,7 +570,8 @@ def find_corresponding(targets, dst_graph, dst_scope="", src_scope=""):
 
 def _python_type_to_attr_list_elem(
         list_value, # type: tf.AttrValue.ListValue
-        elem # type: Any
+        elem, # type: Any
+        attr_name  # type: String
   ):
   """
   Subroutine of python_type_to_attr_value(). Converts one element of a Python
@@ -592,15 +595,16 @@ def _python_type_to_attr_list_elem(
     list_value.type.append(elem.as_datatype_enum)
   elif isinstance(elem, tf.TensorShape):
     list_value.shape.add().CopyFrom(elem.as_proto())
-  elif isinstance(elem, np.ndarray):
+  elif isinstance(elem, np.ndarray) or isinstance(elem, list):
     list_value.tensor.add().CopyFrom(tf.make_tensor_proto(values=elem))
   # TODO(frreiss): Populate the "func" field of the union here
   else:
     raise ValueError("Don't know how to convert a {} to "
-                     "tf.AttrValue.ListValue".format(type(elem)))
+                     "tf.AttrValue.ListValue for attribute {}".format(type(elem), attr_name))
 
 
-def python_type_to_attr_value(value #type: Any
+def python_type_to_attr_value(value, #type: Any
+                              attr_name #type: String
                               ):
   # type (...) -> tf.AttrValue
   """
@@ -622,7 +626,7 @@ def python_type_to_attr_value(value #type: Any
       list_value = tf.AttrValue.ListValue()
       for elem in value:
         # TODO(frreiss): Should we disallow heterogeneous types in lists?
-        _python_type_to_attr_list_elem(list_value, elem)
+        _python_type_to_attr_list_elem(list_value, elem, attr_name)
       return tf.AttrValue(list=list_value)
   elif isinstance(value, tf.AttrValue):
     # TODO(frreiss): Should this case result in an error?
@@ -633,12 +637,16 @@ def python_type_to_attr_value(value #type: Any
   # Must check for bool before int because bool is a subclass of int in Python
   elif isinstance(value, bool):
     return tf.AttrValue(b=value)
-  elif isinstance(value, int):
+  elif (isinstance(value, int) or
+        isinstance(value, np.int32) or
+        isinstance(value, np.int64)):
     return tf.AttrValue(i=value)
-  elif isinstance(value, float):
+  elif isinstance(value, float) or isinstance(value, np.float):
     return tf.AttrValue(f=value)
   elif isinstance(value, tf.DType):
     return tf.AttrValue(type=value.as_datatype_enum)
+  elif isinstance(value, np.dtype):
+    return tf.AttrValue(type=tf.as_dtype(value).as_datatype_enum)
   elif isinstance(value, tf.TensorShape):
     return tf.AttrValue(shape=value.as_proto())
   elif isinstance(value, np.ndarray):
@@ -647,11 +655,14 @@ def python_type_to_attr_value(value #type: Any
   #  here
   else:
     raise ValueError("Don't know how to convert a {} to "
-                     "tf.AttrValue".format(type(value)))
+                     "tf.AttrValue for attribute {}".format(
+                         type(value), attr_name))
 
 
-def attr_value_to_python_type(attr_value # type: tf.AttrValue
-                              ):
+def attr_value_to_python_type(
+    attr_value,  # type: tf.AttrValue
+    attr_name  # type: String
+):
   # type (...) -> Any
   """
   Inverse of python_type_to_attr_value().
@@ -681,14 +692,17 @@ def attr_value_to_python_type(attr_value # type: tf.AttrValue
     return tf.TensorShape(attr_value.shape)
   elif attr_value.HasField("tensor"):   # TensorProto
     return tf.make_ndarray(attr_value.tensor)
-  # TODO(frreiss): Convert the "func" and "placeholder" fields of the union
-  #  here
+  elif attr_value.HasField("list"):     # list
+    return attr_value.list
+  elif attr_value.HasField("func"):     # func
+    return attr_value.func
+  # TODO(frreiss): Convert the "placeholder" fields of the union  here
   else:
     raise ValueError("Don't know how to convert AttrValue {} to "
-                     "a Python object".format(attr_value))
+                     "a Python object for attribute {}".format(attr_value, attr_name))
 
 
-def load_variables_to_tf_graph(g # type: graph.Graph
+def load_variables_to_tf_graph(g # type: base_graph.BaseGraph
                                ):
   """
   Convenience function to load all variables present in a `gde.Graph` into
@@ -705,7 +719,7 @@ def load_variables_to_tf_graph(g # type: graph.Graph
     tf.add_to_collections(var.collection_names, tf_var)
 
 
-def make_const(g, # type: graph.Graph
+def make_const(g, # type: base_graph.BaseGraph
                name, # type: str
                value, # type: np.ndarray
                uniquify_name=False # type: bool
@@ -731,7 +745,7 @@ def make_const(g, # type: graph.Graph
   return ret
 
 
-def make_placeholder(g, # type: graph.Graph
+def make_placeholder(g, # type: base_graph.BaseGraph
                      name, # type: str
                      dtype, # type: tf.DType
                      shape, #type: tf.TensorShape
@@ -757,7 +771,7 @@ def make_placeholder(g, # type: graph.Graph
   return ret
 
 
-def make_identity(g, # type: graph.Graph
+def make_identity(g, # type: base_graph.BaseGraph
                   name, # type: str
                   input, # type: tensor.Tensor
                   uniquify_name=False # type: bool
@@ -782,7 +796,7 @@ def make_identity(g, # type: graph.Graph
   return ret
 
 
-def make_simple_binary_op(g, # type: graph.Graph
+def make_simple_binary_op(g, # type: base_graph.BaseGraph
                           name, # type: str
                           op_name, # type: str
                           input_1, # type: tensor.Tensor
@@ -817,3 +831,51 @@ def make_simple_binary_op(g, # type: graph.Graph
   ret.set_inputs([input_1, input_2])
   ret.infer_outputs()
   return ret
+
+
+def copy_directory(oldpath, newpath, overwrite=False):
+  """Recursively copy a directory of files to GCS.
+
+  Args:
+    oldpath: string, bytes, or os.PathLike; a pathname of a directory.
+    newpath: string, bytes, or os.PathLike; a pathname to which the directory
+      will be copied.
+    overwrite: boolean; if false, it is an error for newpath to be occupied by
+      an existing file.
+  """
+  assert tf.gfile.IsDirectory(oldpath)
+  items = tf.gfile.Walk(oldpath)
+  for dirname, subdirs, filenames in items:
+    for subdir in subdirs:
+      tf.gfile.MakeDirs(os.path.join(dirname, subdir))
+      full_subdir = os.path.join(dirname, subdir)
+      remote_dir_path = os.path.join(newpath, full_subdir[1 + len(oldpath) :])
+      tf.gfile.MakeDirs(remote_dir_path)
+    for filename in filenames:
+      full_filename = os.path.join(dirname, filename)
+      remote_file_path = os.path.join(newpath,
+                                      full_filename[1 + len(oldpath) :])
+      tf.gfile.Copy(full_filename, remote_file_path, overwrite=overwrite)
+
+
+def parse_graphviz_json(json_string):
+  """Parses JSON representation of graphviz graph.
+
+  Args:
+    json_string: graphviz graph representation in JSON string format.
+
+  Returns:
+    graph in a dictionary format.
+  """
+  d = json.loads(json_string)
+  gv_graph = {}
+  node_id_to_name = {}
+  for obj in d["objects"]:
+    node_id_to_name[obj["_gvid"]] = obj["name"]
+    gv_graph[obj["name"]] = list()
+
+  for edge in d["edges"]:
+    gv_graph[node_id_to_name[edge["tail"]]].append(
+        node_id_to_name[edge["head"]])
+
+  return gv_graph
