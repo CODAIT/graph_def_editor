@@ -1,0 +1,5 @@
+global-include *.py[co]
+global-exclude *.py
+include setup.py
+prune tests/
+prune examples/
