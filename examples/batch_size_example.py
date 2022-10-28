@@ -62,7 +62,26 @@ def main(_):
     urllib.request.urlretrieve(_MODEL_URL, _MODEL_TARBALL)
     print("Unpacking SavedModel from {} to {}".format(_MODEL_TARBALL, _TMP_DIR))
     with tarfile.open(_MODEL_TARBALL) as t:
-      t.extractall(_TMP_DIR)
+      def is_within_directory(directory, target):
+          
+          abs_directory = os.path.abspath(directory)
+          abs_target = os.path.abspath(target)
+      
+          prefix = os.path.commonprefix([abs_directory, abs_target])
+          
+          return prefix == abs_directory
+      
+      def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+      
+          for member in tar.getmembers():
+              member_path = os.path.join(path, member.name)
+              if not is_within_directory(path, member_path):
+                  raise Exception("Attempted Path Traversal in Tar File")
+      
+          tar.extractall(path, members, numeric_owner=numeric_owner) 
+          
+      
+      safe_extract(t, _TMP_DIR)
 
   # Load the SavedModel
   tf_g = tf.Graph()
